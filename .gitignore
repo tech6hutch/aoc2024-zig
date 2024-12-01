@@ -1,0 +1,5 @@
+# AoC
+inputs
+# Zig
+.zig-cache
+zig-out
