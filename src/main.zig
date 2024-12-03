@@ -1,12 +1,78 @@
 const std = @import("std");
 
+var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
+const ally = general_purpose_allocator.allocator();
+
+const DayInfo = struct{
+    f: fn (std.fs.File) anyerror!struct {i64, i64},
+    answers: struct{i64, i64 = 0},
+    test_answers: struct{i64, i64} = .{-1, -1},
+};
+
+const days = .{
+    DayInfo{
+        .f = day1,
+        .answers = .{1530215, 26800609},
+    },
+    DayInfo{
+        .f = day2,
+        .answers = .{314, 373},
+        .test_answers = .{2, 4},
+    },
+};
+
 pub fn main() !void {
-    var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
-    const ally = general_purpose_allocator.allocator();
+    try do_solutions(false);
+}
 
-    var input_file = try std.fs.cwd().openFile("./inputs/day1", .{});
-    defer input_file.close();
+test "solutions against test inputs" {
+    try do_solutions(true);
+}
 
+const SolutionInputs = enum{
+    Normal,
+    Example,
+};
+fn do_solutions(comptime use_example_inputs: bool) !void {
+    var stdout =
+        if (use_example_inputs) std.io.getStdErr().writer()
+        else std.io.getStdOut().writer();
+
+    inline for (1..days.len+1) |day| {
+        // You can't use continue in an inline loop, for some reason.
+        inline_continue: {
+            var input_file = std.fs.cwd().openFile(
+                std.fmt.comptimePrint("./{s}/day{d}",
+                    .{if (use_example_inputs) "examples" else "inputs", day}),
+                .{}
+            ) catch |err| switch (err) {
+                std.fs.File.OpenError.FileNotFound => {
+                    try stdout.print("Skipping day {d}\n", .{day});
+                    break :inline_continue;
+                },
+                else => return err
+            };
+            defer input_file.close();
+
+            const info = days[day-1];
+            const answers = try info.f(input_file);
+
+            try stdout.print("Day {d}\n", .{day});
+            inline for (0..info.answers.len) |i| {
+                const given = answers[i];
+                const correct = if (use_example_inputs) info.test_answers[i] else info.answers[i];
+                try stdout.print("part {d}: {d}", .{i + 1, given});
+                if (correct != -1) {
+                    try stdout.print(" ({s})",
+                        .{if (given == correct) "correct" else "incorrect"});
+                }
+                try stdout.print("\n", .{});
+            }
+        }
+    }
+}
+
+fn day1(input_file: std.fs.File) !struct {i64, i64} {
     var buf_reader = std.io.bufferedReader(input_file.reader());
     var input = buf_reader.reader();
     var buf: [256]u8 = undefined;
@@ -28,12 +94,12 @@ pub fn main() !void {
     std.mem.sort(i32, second_list.items, {}, std.sort.asc(i32));
 
     std.debug.assert(first_list.items.len == second_list.items.len);
-    var total_dist: u64 = 0;
+    var total_dist: i64 = 0;
     for (first_list.items, second_list.items) |first, second| {
         total_dist += @abs(first - second);
     }
 
-    var similarity: u64 = 0;
+    var similarity: i64 = 0;
     for (first_list.items) |first| {
         for (second_list.items) |second| {
             if (first == second) {
@@ -42,8 +108,67 @@ pub fn main() !void {
         }
     }
 
-    var stdout = std.io.getStdOut().writer();
-    try stdout.print("Day 1\n", .{});
-    try stdout.print("part 1: {d} ({s}correct)\n", .{total_dist, if (total_dist == 1530215) "" else "in"});
-    try stdout.print("part 2: {d} ({s}correct)\n", .{similarity, if (similarity == 26800609) "" else "in"});
+    return .{ total_dist, similarity };
+}
+
+fn day2(input_file: std.fs.File) !struct {i64, i64} {
+    var buf_reader = std.io.bufferedReader(input_file.reader());
+    var input = buf_reader.reader();
+    var buf: [256]u8 = undefined;
+    var part1_safe: i64 = 0;
+    var part2_safe: i64 = 0;
+    var nums = try std.ArrayList(i32).initCapacity(ally, 8);
+    while (try input.readUntilDelimiterOrEof(&buf, '\n')) |line| {
+        nums.clearRetainingCapacity();
+        var it = std.mem.splitScalar(u8, line, ' ');
+        while (it.next()) |str| {
+            const s = std.mem.trim(u8, str, "\r\n");
+            if (s.len > 0) {
+                try nums.append(
+                    try std.fmt.parseInt(i32, s, 10)
+                );
+            }
+        }
+        if (nums.items.len == 0) break;
+        
+        if (report_is_safe(nums.items)) {
+            part1_safe += 1;
+            part2_safe += 1;
+            continue;
+        }
+
+        for (0..nums.items.len) |i| {
+            var nums2 = try nums.clone();
+            _ = nums2.orderedRemove(i);
+            if (report_is_safe(nums2.items)) {
+                part2_safe += 1;
+                break;
+            }
+        }
+    }
+    return .{part1_safe, part2_safe};
+}
+
+fn report_is_safe(reports: []i32) bool {
+    if (reports.len < 2) {
+        return reports.len == 1;
+    }
+    const first = reports[0];
+    const second = reports[1];
+    const going_up: bool =
+        if (first < second) true
+        else if (first > second) false
+        else return false;
+    var prev = first;
+    for (1..reports.len) |i| {
+        const n = reports[i];
+        if (prev == n
+            or going_up != (prev < n)
+            or @abs(prev - n) > 3
+        ) {
+            return false;
+        }
+        prev = n;
+    }
+    return true;
 }
