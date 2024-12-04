@@ -4,20 +4,29 @@ var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
 const ally = general_purpose_allocator.allocator();
 
 const DayInfo = struct{
-    f: fn (std.fs.File) anyerror!struct {i64, i64},
-    answers: struct{i64, i64 = 0},
+    f: union(enum) {
+        one: fn (std.fs.File) anyerror!struct {i64, i64},
+        two: fn (std.fs.File, std.fs.File) anyerror!struct {i64, i64},
+    },
+    answers: struct{i64, i64 = 0} = .{0, 0},
     test_answers: struct{i64, i64} = .{-1, -1},
 };
 
 const days = .{
     DayInfo{
-        .f = day1,
+        .f = .{.one = day1},
         .answers = .{1530215, 26800609},
     },
     DayInfo{
-        .f = day2,
+        .f = .{.one = day2},
         .answers = .{314, 373},
         .test_answers = .{2, 4},
+    },
+    DayInfo{
+        // .f = .{.two = day3},
+        .f = .{.one = day3},
+        .answers = .{173529487, 99532691},
+        .test_answers = .{161, 48},
     },
 };
 
@@ -41,21 +50,36 @@ fn do_solutions(comptime use_example_inputs: bool) !void {
     inline for (1..days.len+1) |day| {
         // You can't use continue in an inline loop, for some reason.
         inline_continue: {
-            var input_file = std.fs.cwd().openFile(
+            const input_file = std.fs.cwd().openFile(
                 std.fmt.comptimePrint("./{s}/day{d}",
                     .{if (use_example_inputs) "examples" else "inputs", day}),
                 .{}
-            ) catch |err| switch (err) {
-                std.fs.File.OpenError.FileNotFound => {
-                    try stdout.print("Skipping day {d}\n", .{day});
-                    break :inline_continue;
-                },
-                else => return err
-            };
-            defer input_file.close();
+            ) catch null;
+            const input_file_part1 = std.fs.cwd().openFile(
+                std.fmt.comptimePrint("./{s}/day{d}pt1",
+                    .{if (use_example_inputs) "examples" else "inputs", day}),
+                .{}
+            ) catch null;
+            const input_file_part2 = std.fs.cwd().openFile(
+                std.fmt.comptimePrint("./{s}/day{d}pt2",
+                    .{if (use_example_inputs) "examples" else "inputs", day}),
+                .{}
+            ) catch null;
+            defer {
+                if (input_file) |file| file.close();
+                if (input_file_part1) |file| file.close();
+                if (input_file_part2) |file| file.close();
+            }
+            if (input_file == null and input_file_part1 == null and input_file_part2 == null) {
+                try stdout.print("Skipping day {d}\n", .{day});
+                break :inline_continue;
+            }
 
             const info = days[day-1];
-            const answers = try info.f(input_file);
+            const answers = switch (info.f) {
+                .one => |f| try f(input_file.?),
+                .two => |f| try f(input_file_part1.?, input_file_part2.?),
+            };
 
             try stdout.print("Day {d}\n", .{day});
             inline for (0..info.answers.len) |i| {
@@ -171,4 +195,70 @@ fn report_is_safe(reports: []i32) bool {
         prev = n;
     }
     return true;
+}
+
+fn day3(input_file: std.fs.File) !struct {i64, i64} {
+    // var buf_reader = std.io.bufferedReader(input_file.reader());
+    // var input = buf_reader.reader();
+    // var buf: [256]u8 = undefined;
+    // var mul_start: usize = 0;
+    // input.skipUntilDelimiterOrEof("mul(");
+    const input = try input_file.readToEndAlloc(ally, 10_000_000);
+    const MULSTR = "mul(";
+    const DOSTR = "do()";
+    const DONTSTR = "don't()";
+
+    var all_sum: i64 = 0;
+    var enabled_sum: i64 = 0;
+    var enabled = true;
+    var mul_start: usize = 0;
+    each_mul_loop: while (mul_start < input.len) {
+        while (true) {
+            if (mul_start >= input.len) {
+                break :each_mul_loop;
+            }
+            
+            if (std.mem.startsWith(u8, input[mul_start..], MULSTR)) {
+                mul_start += MULSTR.len;
+                break;
+            }
+            if (std.mem.startsWith(u8, input[mul_start..], DOSTR)) {
+                mul_start += DOSTR.len;
+                enabled = true;
+                continue :each_mul_loop;
+            }
+            if (std.mem.startsWith(u8, input[mul_start..], DONTSTR)) {
+                mul_start += DONTSTR.len;
+                enabled = false;
+                continue :each_mul_loop;
+            }
+
+            mul_start += 1;
+        }
+
+        var int_end = mul_start;
+        while (std.ascii.isDigit(input[int_end])) int_end += 1;
+        const int1 = parseI32(input[mul_start..int_end])
+            catch continue :each_mul_loop;
+        mul_start = int_end;
+        if (input[mul_start] != ',') continue :each_mul_loop;
+        mul_start += 1;
+        int_end = mul_start;
+        while (std.ascii.isDigit(input[int_end])) int_end += 1;
+        const int2 = parseI32(input[mul_start..int_end])
+            catch continue :each_mul_loop;
+        mul_start = int_end;
+        if (input[mul_start] != ')') continue :each_mul_loop;
+
+        all_sum += int1 * int2;
+        if (enabled) {
+            enabled_sum += int1 * int2;
+        }
+    }
+
+    return .{all_sum, enabled_sum};
+}
+
+fn parseI32(buf: []const u8) std.fmt.ParseIntError!i32 {
+    return std.fmt.parseInt(i32, buf, 10);
 }
