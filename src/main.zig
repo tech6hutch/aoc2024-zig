@@ -30,7 +30,7 @@ const days = .{
     },
     DayInfo{
         .f = .{ .one = day4 },
-        .answers = .{ 2567, -1 },
+        .answers = .{ 2567, 2029 },
         .test_answers = .{ 18, 9 },
     },
 };
