@@ -3,30 +3,35 @@ const std = @import("std");
 var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
 const ally = general_purpose_allocator.allocator();
 
-const DayInfo = struct{
+const DayInfo = struct {
     f: union(enum) {
-        one: fn (std.fs.File) anyerror!struct {i64, i64},
-        two: fn (std.fs.File, std.fs.File) anyerror!struct {i64, i64},
+        one: fn (std.fs.File) anyerror!struct { i64, i64 },
+        two: fn (std.fs.File, std.fs.File) anyerror!struct { i64, i64 },
     },
-    answers: struct{i64, i64 = 0} = .{0, 0},
-    test_answers: struct{i64, i64} = .{-1, -1},
+    answers: struct { i64, i64 = 0 } = .{ -1, -1 },
+    test_answers: struct { i64, i64 } = .{ -1, -1 },
 };
 
 const days = .{
     DayInfo{
-        .f = .{.one = day1},
-        .answers = .{1530215, 26800609},
+        .f = .{ .one = day1 },
+        .answers = .{ 1530215, 26800609 },
     },
     DayInfo{
-        .f = .{.one = day2},
-        .answers = .{314, 373},
-        .test_answers = .{2, 4},
+        .f = .{ .one = day2 },
+        .answers = .{ 314, 373 },
+        .test_answers = .{ 2, 4 },
     },
     DayInfo{
         // .f = .{.two = day3},
-        .f = .{.one = day3},
-        .answers = .{173529487, 99532691},
-        .test_answers = .{161, 48},
+        .f = .{ .one = day3 },
+        .answers = .{ 173529487, 99532691 },
+        .test_answers = .{ 161, 48 },
+    },
+    DayInfo{
+        .f = .{ .one = day4 },
+        .answers = .{ 2567, -1 },
+        .test_answers = .{ 18, 9 },
     },
 };
 
@@ -38,44 +43,35 @@ test "solutions against test inputs" {
     try do_solutions(true);
 }
 
-const SolutionInputs = enum{
+const SolutionInputs = enum {
     Normal,
     Example,
 };
 fn do_solutions(comptime use_example_inputs: bool) !void {
     var stdout =
-        if (use_example_inputs) std.io.getStdErr().writer()
-        else std.io.getStdOut().writer();
+        if (use_example_inputs) std.io.getStdErr().writer() else std.io.getStdOut().writer();
 
-    inline for (1..days.len+1) |day| {
+    inline for (1..days.len + 1) |day| {
         // You can't use continue in an inline loop, for some reason.
         inline_continue: {
-            const input_file = std.fs.cwd().openFile(
-                std.fmt.comptimePrint("./{s}/day{d}",
-                    .{if (use_example_inputs) "examples" else "inputs", day}),
-                .{}
-            ) catch null;
-            const input_file_part1 = std.fs.cwd().openFile(
-                std.fmt.comptimePrint("./{s}/day{d}pt1",
-                    .{if (use_example_inputs) "examples" else "inputs", day}),
-                .{}
-            ) catch null;
-            const input_file_part2 = std.fs.cwd().openFile(
-                std.fmt.comptimePrint("./{s}/day{d}pt2",
-                    .{if (use_example_inputs) "examples" else "inputs", day}),
-                .{}
-            ) catch null;
+            const input_file = std.fs.cwd().openFile(std.fmt.comptimePrint("./{s}/day{d}", .{ if (use_example_inputs) "examples" else "inputs", day }), .{}) catch null;
+            const input_file_part1 = std.fs.cwd().openFile(std.fmt.comptimePrint("./{s}/day{d}pt1", .{ if (use_example_inputs) "examples" else "inputs", day }), .{}) catch null;
+            const input_file_part2 = std.fs.cwd().openFile(std.fmt.comptimePrint("./{s}/day{d}pt2", .{ if (use_example_inputs) "examples" else "inputs", day }), .{}) catch null;
             defer {
                 if (input_file) |file| file.close();
                 if (input_file_part1) |file| file.close();
                 if (input_file_part2) |file| file.close();
             }
-            if (input_file == null and input_file_part1 == null and input_file_part2 == null) {
+
+            const info = days[day - 1];
+            if (
+                (input_file == null and info.f == .one) or
+                ((input_file_part1 == null or input_file_part2 == null) and info.f == .two)
+            ) {
                 try stdout.print("Skipping day {d}\n", .{day});
                 break :inline_continue;
             }
 
-            const info = days[day-1];
             const answers = switch (info.f) {
                 .one => |f| try f(input_file.?),
                 .two => |f| try f(input_file_part1.?, input_file_part2.?),
@@ -85,10 +81,9 @@ fn do_solutions(comptime use_example_inputs: bool) !void {
             inline for (0..info.answers.len) |i| {
                 const given = answers[i];
                 const correct = if (use_example_inputs) info.test_answers[i] else info.answers[i];
-                try stdout.print("part {d}: {d}", .{i + 1, given});
+                try stdout.print("part {d}: {d}", .{ i + 1, given });
                 if (correct != -1) {
-                    try stdout.print(" ({s})",
-                        .{if (given == correct) "correct" else "incorrect"});
+                    try stdout.print(" ({s})", .{if (given == correct) "correct" else "incorrect"});
                 }
                 try stdout.print("\n", .{});
             }
@@ -96,7 +91,7 @@ fn do_solutions(comptime use_example_inputs: bool) !void {
     }
 }
 
-fn day1(input_file: std.fs.File) !struct {i64, i64} {
+fn day1(input_file: std.fs.File) !struct { i64, i64 } {
     var buf_reader = std.io.bufferedReader(input_file.reader());
     var input = buf_reader.reader();
     var buf: [256]u8 = undefined;
@@ -113,7 +108,7 @@ fn day1(input_file: std.fs.File) !struct {i64, i64} {
         try first_list.append(ally, first);
         try second_list.append(ally, second);
     }
-    
+
     std.mem.sort(i32, first_list.items, {}, std.sort.asc(i32));
     std.mem.sort(i32, second_list.items, {}, std.sort.asc(i32));
 
@@ -135,7 +130,7 @@ fn day1(input_file: std.fs.File) !struct {i64, i64} {
     return .{ total_dist, similarity };
 }
 
-fn day2(input_file: std.fs.File) !struct {i64, i64} {
+fn day2(input_file: std.fs.File) !struct { i64, i64 } {
     var buf_reader = std.io.bufferedReader(input_file.reader());
     var input = buf_reader.reader();
     var buf: [256]u8 = undefined;
@@ -148,13 +143,11 @@ fn day2(input_file: std.fs.File) !struct {i64, i64} {
         while (it.next()) |str| {
             const s = std.mem.trim(u8, str, "\r\n");
             if (s.len > 0) {
-                try nums.append(
-                    try std.fmt.parseInt(i32, s, 10)
-                );
+                try nums.append(try std.fmt.parseInt(i32, s, 10));
             }
         }
         if (nums.items.len == 0) break;
-        
+
         if (report_is_safe(nums.items)) {
             part1_safe += 1;
             part2_safe += 1;
@@ -170,7 +163,7 @@ fn day2(input_file: std.fs.File) !struct {i64, i64} {
             }
         }
     }
-    return .{part1_safe, part2_safe};
+    return .{ part1_safe, part2_safe };
 }
 
 fn report_is_safe(reports: []i32) bool {
@@ -180,16 +173,11 @@ fn report_is_safe(reports: []i32) bool {
     const first = reports[0];
     const second = reports[1];
     const going_up: bool =
-        if (first < second) true
-        else if (first > second) false
-        else return false;
+        if (first < second) true else if (first > second) false else return false;
     var prev = first;
     for (1..reports.len) |i| {
         const n = reports[i];
-        if (prev == n
-            or going_up != (prev < n)
-            or @abs(prev - n) > 3
-        ) {
+        if (prev == n or going_up != (prev < n) or @abs(prev - n) > 3) {
             return false;
         }
         prev = n;
@@ -197,7 +185,7 @@ fn report_is_safe(reports: []i32) bool {
     return true;
 }
 
-fn day3(input_file: std.fs.File) !struct {i64, i64} {
+fn day3(input_file: std.fs.File) !struct { i64, i64 } {
     // var buf_reader = std.io.bufferedReader(input_file.reader());
     // var input = buf_reader.reader();
     // var buf: [256]u8 = undefined;
@@ -217,7 +205,7 @@ fn day3(input_file: std.fs.File) !struct {i64, i64} {
             if (mul_start >= input.len) {
                 break :each_mul_loop;
             }
-            
+
             if (std.mem.startsWith(u8, input[mul_start..], MULSTR)) {
                 mul_start += MULSTR.len;
                 break;
@@ -238,15 +226,13 @@ fn day3(input_file: std.fs.File) !struct {i64, i64} {
 
         var int_end = mul_start;
         while (std.ascii.isDigit(input[int_end])) int_end += 1;
-        const int1 = parseI32(input[mul_start..int_end])
-            catch continue :each_mul_loop;
+        const int1 = parseI32(input[mul_start..int_end]) catch continue :each_mul_loop;
         mul_start = int_end;
         if (input[mul_start] != ',') continue :each_mul_loop;
         mul_start += 1;
         int_end = mul_start;
         while (std.ascii.isDigit(input[int_end])) int_end += 1;
-        const int2 = parseI32(input[mul_start..int_end])
-            catch continue :each_mul_loop;
+        const int2 = parseI32(input[mul_start..int_end]) catch continue :each_mul_loop;
         mul_start = int_end;
         if (input[mul_start] != ')') continue :each_mul_loop;
 
@@ -256,9 +242,116 @@ fn day3(input_file: std.fs.File) !struct {i64, i64} {
         }
     }
 
-    return .{all_sum, enabled_sum};
+    return .{ all_sum, enabled_sum };
+}
+
+fn day4(input_file: std.fs.File) !struct { i64, i64 } {
+    var lines = std.ArrayList([]const u8).init(ally);
+    var lines_iter = std.mem.splitScalar(u8, try input_file.readToEndAlloc(ally, 10_000_000), '\n');
+    while (lines_iter.next()) |line| {
+        try lines.append(line);
+    }
+
+    // Part 1
+    var pt1_count: i64 = 0;
+    {
+        const XMAS = "XMAS";
+        const directions = [_]struct{isize, isize}{
+            .{-1, -1}, .{0, -1}, .{1, -1},
+            .{-1,  0},           .{1,  0},
+            .{-1,  1}, .{0,  1}, .{1,  1},
+        };
+
+        var i: isize = -1;
+        for (lines.items) |line| {
+            i += 1;
+            var j: isize = -1;
+            for (line) |char| {
+                j += 1;
+                if (char != XMAS[0]) continue;
+                for (directions) |dir| {
+                    var ii = i;
+                    var jj = j;
+                    for (XMAS) |xmas_char| {
+                        if (
+                            ii < 0 or ii >= lines.items.len or
+                            jj < 0 or jj >= lines.items[@intCast(ii)].len
+                        ) break;
+                        if (lines.items[@intCast(ii)][@intCast(jj)] != xmas_char) break;
+                        ii += dir[0];
+                        jj += dir[1];
+                    } else {
+                        pt1_count += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    // Part 2
+    var pt2_count: i64 = 0;
+    {
+        var i: isize = -1;
+        for (lines.items) |line| {
+            i += 1;
+            var j: isize = -1;
+            for (line) |char| {
+                j += 1;
+                if (char != 'A') continue;
+                switch (get2d(u8, lines.items, i - 1, j - 1, ' ')) {
+                    'M' => switch (get2d(u8, lines.items, i + 1, j + 1, ' ')) {
+                        'S' => {},
+                        else => continue
+                    },
+                    'S' => switch (get2d(u8, lines.items, i + 1, j + 1, ' ')) {
+                        'M' => {},
+                        else => continue
+                    },
+                    else => continue
+                }
+                switch (get2d(u8, lines.items, i + 1, j - 1, ' ')) {
+                    'M' => switch (get2d(u8, lines.items, i - 1, j + 1, ' ')) {
+                        'S' => {},
+                        else => continue
+                    },
+                    'S' => switch (get2d(u8, lines.items, i - 1, j + 1, ' ')) {
+                        'M' => {},
+                        else => continue
+                    },
+                    else => continue
+                }
+                pt2_count += 1;
+                // var m_count: u8 = 0;
+                // var s_count: u8 = 0;
+                // for (directions) |dir| {
+                //     const ii = i + dir[0];
+                //     const jj = j + dir[1];
+                //     if (
+                //         ii < 0 or ii >= lines.items.len or
+                //         jj < 0 or jj >= lines.items[@intCast(ii)].len
+                //     ) continue;
+                //     switch (lines.items[@intCast(ii)][@intCast(jj)]) {
+                //         'M' => m_count += 1,
+                //         'S' => s_count += 1,
+                //         else => {}
+                //     }
+                // }
+                // if (m_count == 2 and s_count == 2) {
+                //     pt2_count += 1;
+                // }
+            }
+        }
+    }
+
+    return .{pt1_count, pt2_count};
 }
 
 fn parseI32(buf: []const u8) std.fmt.ParseIntError!i32 {
     return std.fmt.parseInt(i32, buf, 10);
+}
+
+fn get2d(comptime T: type, slice: []const []const T, i: isize, j: isize, default: T) T {
+    return
+        if (i < 0 or i >= slice.len or j < 0 or j >= slice[@intCast(i)].len) default
+        else slice[@intCast(i)][@intCast(j)];
 }
