@@ -35,8 +35,8 @@ const days = .{
     },
     DayInfo{
         .f = .{ .one = day5 },
-        .answers = .{7307, -1},
-        .test_answers = .{143, -1},
+        .answers = .{7307, 4713},
+        .test_answers = .{143, 123},
     },
 };
 
@@ -333,14 +333,15 @@ fn day4(input_file: std.fs.File) !struct { i64, i64 } {
     return .{pt1_count, pt2_count};
 }
 
+const Day5Rule = struct {
+    before: []const u8,
+    after: []const u8,
+};
 fn day5(input_file: std.fs.File) !struct { i64, i64 } {
     const input = try input_file.readToEndAlloc(ally, 10_000_000);
     var lines_iter = std.mem.tokenizeAny(u8, input, "\r\n");
 
-    const Rule = struct {
-        before: []const u8,
-        after: []const u8,
-    };
+    const Rule = Day5Rule;
     var rules = std.ArrayList(Rule).init(ally);
     while (lines_iter.peek()) |line| {
         if (std.mem.indexOfScalar(u8, line, '|') == null) break;
@@ -352,28 +353,44 @@ fn day5(input_file: std.fs.File) !struct { i64, i64 } {
         });
     }
 
-    var sum_of_middles: i64 = 0;
-    update_loop: while (lines_iter.next()) |line| {
+    var sum_of_valid: i64 = 0;
+    var sum_of_reordered: i64 = 0;
+    while (lines_iter.next()) |line| {
         var update = std.ArrayList([]const u8).init(ally);
         var it = std.mem.splitScalar(u8, line, ',');
         while (it.next()) |item| {
             try update.append(item);
         }
 
-        for (rules.items) |rule| {
+        var is_valid = true;
+        rule_loop: for (rules.items) |rule| {
             for (0.., update.items) |i, n| {
                 if (!std.mem.eql(u8, n, rule.after)) continue;
                 for (i..update.items.len) |j| {
                     if (std.mem.eql(u8, update.items[j], rule.before)) {
-                        continue :update_loop;
+                        is_valid = false;
+                        break :rule_loop;
                     }
                 }
             }
         }
-        sum_of_middles += try std.fmt.parseInt(i64, update.items[update.items.len / 2], 10);
+        if (is_valid) {
+            sum_of_valid += try std.fmt.parseInt(i64, update.items[update.items.len / 2], 10);
+        } else {
+            std.mem.sortUnstable([]const u8, update.items, rules.items, applyRules);
+            sum_of_reordered += try std.fmt.parseInt(i64, update.items[update.items.len / 2], 10);
+        }
     }
 
-    return .{sum_of_middles, -1};
+    return .{sum_of_valid, sum_of_reordered};
+}
+
+fn applyRules(rules: []const Day5Rule, lhs: []const u8, rhs: []const u8) bool {
+    for (rules) |rule| {
+        if (std.mem.eql(u8, lhs, rule.before) and std.mem.eql(u8, rhs, rule.after)) return true;
+        if (std.mem.eql(u8, rhs, rule.before) and std.mem.eql(u8, lhs, rule.after)) return false;
+    }
+    return false;
 }
 
 fn parseI32(buf: []const u8) std.fmt.ParseIntError!i32 {
