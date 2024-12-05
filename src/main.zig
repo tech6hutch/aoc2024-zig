@@ -35,6 +35,8 @@ const days = .{
     },
     DayInfo{
         .f = .{ .one = day5 },
+        .answers = .{7307, -1},
+        .test_answers = .{143, -1},
     },
 };
 
@@ -332,28 +334,26 @@ fn day4(input_file: std.fs.File) !struct { i64, i64 } {
 }
 
 fn day5(input_file: std.fs.File) !struct { i64, i64 } {
-    var buf_reader = std.io.bufferedReader(input_file.reader());
-    var input_reader = buf_reader.reader();
-    var line_buf: [256]u8 = undefined;
+    const input = try input_file.readToEndAlloc(ally, 10_000_000);
+    var lines_iter = std.mem.tokenizeAny(u8, input, "\r\n");
 
     const Rule = struct {
         before: []const u8,
         after: []const u8,
     };
     var rules = std.ArrayList(Rule).init(ally);
-    while (try input_reader.readUntilDelimiterOrEof(&line_buf, '\n')) |line| {
-        if (is_blank(line)) break;
+    while (lines_iter.peek()) |line| {
+        if (std.mem.indexOfScalar(u8, line, '|') == null) break;
+        _ = lines_iter.next().?;
         var it = std.mem.splitScalar(u8, line, '|');
-        const before_slice = it.next() orelse return error.InvalidRule;
-        const after_slice = it.next() orelse return error.InvalidRule;
         try rules.append(Rule {
-            .before = before_slice,
-            .after = after_slice,
+            .before = it.next() orelse return error.InvalidRule,
+            .after = it.next() orelse return error.InvalidRule,
         });
     }
 
     var sum_of_middles: i64 = 0;
-    update_loop: while (try input_reader.readUntilDelimiterOrEof(&line_buf, '\n')) |line| {
+    update_loop: while (lines_iter.next()) |line| {
         var update = std.ArrayList([]const u8).init(ally);
         var it = std.mem.splitScalar(u8, line, ',');
         while (it.next()) |item| {
@@ -362,9 +362,11 @@ fn day5(input_file: std.fs.File) !struct { i64, i64 } {
 
         for (rules.items) |rule| {
             for (0.., update.items) |i, n| {
-                if (std.mem.eql(u8, n, rule.after)) continue;
+                if (!std.mem.eql(u8, n, rule.after)) continue;
                 for (i..update.items.len) |j| {
-                    if (std.mem.eql(u8, update.items[j], rule.before)) continue :update_loop;
+                    if (std.mem.eql(u8, update.items[j], rule.before)) {
+                        continue :update_loop;
+                    }
                 }
             }
         }
