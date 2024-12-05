@@ -337,8 +337,8 @@ fn day5(input_file: std.fs.File) !struct { i64, i64 } {
     var line_buf: [256]u8 = undefined;
 
     const Rule = struct {
-        before: u32,
-        after: u32,
+        before: []const u8,
+        after: []const u8,
     };
     var rules = std.ArrayList(Rule).init(ally);
     while (try input_reader.readUntilDelimiterOrEof(&line_buf, '\n')) |line| {
@@ -347,23 +347,31 @@ fn day5(input_file: std.fs.File) !struct { i64, i64 } {
         const before_slice = it.next() orelse return error.InvalidRule;
         const after_slice = it.next() orelse return error.InvalidRule;
         try rules.append(Rule {
-            .before = try std.fmt.parseInt(u32, before_slice, 10),
-            .after = try std.fmt.parseInt(u32, after_slice, 10),
+            .before = before_slice,
+            .after = after_slice,
         });
     }
 
-    var sum: i64 = 0;
-    while (try input_reader.readUntilDelimiterOrEof(&line_buf, '\n')) |line| {
-        var update = std.ArrayList(u32).init(ally);
+    var sum_of_middles: i64 = 0;
+    update_loop: while (try input_reader.readUntilDelimiterOrEof(&line_buf, '\n')) |line| {
+        var update = std.ArrayList([]const u8).init(ally);
         var it = std.mem.splitScalar(u8, line, ',');
         while (it.next()) |item| {
-            try update.append(try std.fmt.parseInt(u32, item, 10));
+            try update.append(item);
         }
 
-        if (is_sorted(update)) {
-            sum += update[update.items.len / 2];
+        for (rules.items) |rule| {
+            for (0.., update.items) |i, n| {
+                if (std.mem.eql(u8, n, rule.after)) continue;
+                for (i..update.items.len) |j| {
+                    if (std.mem.eql(u8, update.items[j], rule.before)) continue :update_loop;
+                }
+            }
         }
+        sum_of_middles += try std.fmt.parseInt(i64, update.items[update.items.len / 2], 10);
     }
+
+    return .{sum_of_middles, -1};
 }
 
 fn parseI32(buf: []const u8) std.fmt.ParseIntError!i32 {
