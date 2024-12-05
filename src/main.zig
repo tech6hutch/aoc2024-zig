@@ -33,6 +33,9 @@ const days = .{
         .answers = .{ 2567, 2029 },
         .test_answers = .{ 18, 9 },
     },
+    DayInfo{
+        .f = .{ .one = day5 },
+    },
 };
 
 pub fn main() !void {
@@ -321,24 +324,6 @@ fn day4(input_file: std.fs.File) !struct { i64, i64 } {
                     else => continue
                 }
                 pt2_count += 1;
-                // var m_count: u8 = 0;
-                // var s_count: u8 = 0;
-                // for (directions) |dir| {
-                //     const ii = i + dir[0];
-                //     const jj = j + dir[1];
-                //     if (
-                //         ii < 0 or ii >= lines.items.len or
-                //         jj < 0 or jj >= lines.items[@intCast(ii)].len
-                //     ) continue;
-                //     switch (lines.items[@intCast(ii)][@intCast(jj)]) {
-                //         'M' => m_count += 1,
-                //         'S' => s_count += 1,
-                //         else => {}
-                //     }
-                // }
-                // if (m_count == 2 and s_count == 2) {
-                //     pt2_count += 1;
-                // }
             }
         }
     }
@@ -346,12 +331,58 @@ fn day4(input_file: std.fs.File) !struct { i64, i64 } {
     return .{pt1_count, pt2_count};
 }
 
+fn day5(input_file: std.fs.File) !struct { i64, i64 } {
+    var buf_reader = std.io.bufferedReader(input_file.reader());
+    var input_reader = buf_reader.reader();
+    var line_buf: [256]u8 = undefined;
+
+    const Rule = struct {
+        before: u32,
+        after: u32,
+    };
+    var rules = std.ArrayList(Rule).init(ally);
+    while (try input_reader.readUntilDelimiterOrEof(&line_buf, '\n')) |line| {
+        if (is_blank(line)) break;
+        var it = std.mem.splitScalar(u8, line, '|');
+        const before_slice = it.next() orelse return error.InvalidRule;
+        const after_slice = it.next() orelse return error.InvalidRule;
+        try rules.append(Rule {
+            .before = try std.fmt.parseInt(u32, before_slice, 10),
+            .after = try std.fmt.parseInt(u32, after_slice, 10),
+        });
+    }
+
+    var sum: i64 = 0;
+    while (try input_reader.readUntilDelimiterOrEof(&line_buf, '\n')) |line| {
+        var update = std.ArrayList(u32).init(ally);
+        var it = std.mem.splitScalar(u8, line, ',');
+        while (it.next()) |item| {
+            try update.append(try std.fmt.parseInt(u32, item, 10));
+        }
+
+        if (is_sorted(update)) {
+            sum += update[update.items.len / 2];
+        }
+    }
+}
+
 fn parseI32(buf: []const u8) std.fmt.ParseIntError!i32 {
     return std.fmt.parseInt(i32, buf, 10);
+}
+
+fn parseIntUntilEnd(comptime T: type, buf: []const u8) std.fmt.ParseIntError!struct {i32, usize} {
+    var end: usize = 0;
+    while (end < buf.len and std.ascii.isDigit(buf[end])) end += 1;
+    const n = try std.fmt.parseInt(T, buf, 10);
+    return .{n, end};
 }
 
 fn get2d(comptime T: type, slice: []const []const T, i: isize, j: isize, default: T) T {
     return
         if (i < 0 or i >= slice.len or j < 0 or j >= slice[@intCast(i)].len) default
         else slice[@intCast(i)][@intCast(j)];
+}
+
+fn is_blank(str: []const u8) bool {
+    return std.mem.trim(u8, str, " ").len == 0;
 }
