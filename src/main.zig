@@ -43,6 +43,11 @@ const days = .{
         .answers = .{5212, 1767},
         .test_answers = .{41, 6},
     },
+    DayInfo{
+        .f = .{ .one = day7 },
+        .answers = .{3119088655389, 264184041398847},
+        .test_answers = .{3749, 11387},
+    },
 };
 
 pub fn main() !void {
@@ -493,6 +498,73 @@ fn guard_map_count_positions(
     return positions.count();
 }
 
+fn day7(input_file: std.fs.File) !struct {i64, i64} {
+    const input = try input_file.readToEndAlloc(ally, 10_000_000);
+    var line_iter = std.mem.tokenizeAny(u8, input, "\r\n");
+    const Equation = struct {
+        testval: u64,
+        numbers: []u16,
+    };
+    var equations = std.ArrayList(Equation).init(ally);
+    while (line_iter.next()) |line| {
+        const testval, const end = try parseIntUntilItsEnd(u64, line[0..]);
+        if (line[end] != ':') return error.NoColonInEquation;
+        var num_iter = std.mem.tokenizeScalar(u8, line[end+1..], ' ');
+        var num_list = std.ArrayList(u16).init(ally);
+        while (num_iter.next()) |num_str| {
+            try num_list.append(try std.fmt.parseInt(u16, num_str, 10));
+        }
+        try equations.append(Equation {
+            .testval = testval,
+            .numbers = try num_list.toOwnedSlice(),
+        });
+    }
+
+    const Op = Day7Op;
+
+    var part1_calibration: i64 = 0;
+    for (equations.items) |equation| {
+        if (equation_can_be_true(&[_]Op{.@"+", .@"*"}, equation.testval, equation.numbers)) {
+            part1_calibration += @intCast(equation.testval);
+        }
+    }
+
+    var part2_calibration: i64 = 0;
+    for (equations.items) |equation| {
+        if (equation_can_be_true(&[_]Op{.@"+", .@"*", .@"||"}, equation.testval, equation.numbers)) {
+            part2_calibration += @intCast(equation.testval);
+        }
+    }
+
+    return .{part1_calibration, part2_calibration};
+}
+
+const Day7Op = enum {
+    @"+",
+    @"*",
+    @"||",
+};
+
+fn equation_can_be_true(comptime operations: []const Day7Op, testval: u64, numbers: []const u16) bool {
+    std.debug.assert(numbers.len > 0);
+    return _equation_can_be_true(operations, testval, numbers[0], numbers[1..]);
+}
+
+fn _equation_can_be_true(comptime operations: []const Day7Op, testval: u64, used: u64, remaining: []const u16) bool {
+    if (remaining.len == 0) return testval == used;
+    inline for (operations) |op| {
+        const new_used = switch (op) {
+            .@"+" => used + remaining[0],
+            .@"*" => used * remaining[0],
+            .@"||" => concatenateInts(u64, used, remaining[0]),
+        };
+        if (_equation_can_be_true(operations, testval, new_used, remaining[1..])) return true;
+    }
+    return false;
+}
+
+// Helper functions and types
+
 const Dir4 = enum {
     UP, DOWN, LEFT, RIGHT,
 
@@ -543,30 +615,42 @@ const Vec2i = struct {
     }
 };
 
+inline fn concatenateInts(comptime T: type, a: T, b: T) T {
+    var pow: T = 10;
+    while (b >= pow) pow *= 10;
+    return a * pow + b;
+}
+
+test "concatenating integers" {
+    try std.testing.expectEqual(123456, concatenateInts(u32, 123, 456));
+}
+
 fn parseI32(buf: []const u8) std.fmt.ParseIntError!i32 {
     return std.fmt.parseInt(i32, buf, 10);
 }
 
-fn parseIntUntilEnd(comptime T: type, buf: []const u8) std.fmt.ParseIntError!struct {i32, usize} {
+/// Parses out an int of the given type, until it encounters a non-digit char.
+fn parseIntUntilItsEnd(comptime T: type, buf: []const u8) std.fmt.ParseIntError!struct {T, usize} {
     var end: usize = 0;
     while (end < buf.len and std.ascii.isDigit(buf[end])) end += 1;
-    const n = try std.fmt.parseInt(T, buf, 10);
+    const n = try std.fmt.parseInt(T, buf[0..end], 10);
     return .{n, end};
 }
 
+/// Gets a value from a 2D slice if within bounds, else the given default.
 fn get2d(comptime T: type, slice: []const []const T, i: isize, j: isize, default: T) T {
     return
         if (i < 0 or i >= slice.len or j < 0 or j >= slice[@intCast(i)].len) default
         else slice[@intCast(i)][@intCast(j)];
 }
 
-fn is_blank(str: []const u8) bool {
-    return std.mem.trim(u8, str, " ").len == 0;
-}
-
+/// A wrapper to treat a 1D string as being 2D, with the lines as rows. The
+/// lines must be the same length.
 const Str2d = struct {
     str1d: []const u8,
+    /// Line width, including newline char(s).
     width: usize,
+    /// Printable line width (excluding newline char(s)).
     width_sans_end: usize,
 
     fn new(str: []const u8) @This() {
@@ -595,10 +679,12 @@ const Str2d = struct {
         );
     }
 
+    /// Directly index the string. Like usual, this will panic or cause illegal behavior if out of bounds.
     fn index(self: @This(), row: usize, col: usize) u8 {
         return self.str1d[row * self.width + col];
     }
 
+    /// Get the char at the row and column if it exists, else the null char.
     fn get(self: @This(), row: isize, col: isize) u8 {
         return
             if (row < 0 or row >= self.height() or col < 0 or col >= self.width_sans_end) 0
