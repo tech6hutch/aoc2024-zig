@@ -38,6 +38,11 @@ const days = .{
         .answers = .{7307, 4713},
         .test_answers = .{143, 123},
     },
+    DayInfo{
+        .f = .{ .one = day6 },
+        .answers = .{5212, 1767},
+        .test_answers = .{41, 6},
+    },
 };
 
 pub fn main() !void {
@@ -393,6 +398,151 @@ fn applyRules(rules: []const Day5Rule, lhs: []const u8, rhs: []const u8) bool {
     return false;
 }
 
+fn day6(input_file: std.fs.File) !struct {i64, i64} {
+    const input_str = try input_file.readToEndAlloc(ally, 10_000_000);
+    const map = Str2d.new(input_str);
+
+    var initial_guard_pos = Vec2i.ZERO;
+    var initial_guard_dir: Dir4 = undefined;
+    looking_for_guard_loop: for (0..map.height()) |row| {
+        for (0..map.width_sans_end) |col| {
+            const dir = switch (map.index(row, col)) {
+                '^' => Dir4.UP,
+                'v' => Dir4.DOWN,
+                '<' => Dir4.LEFT,
+                '>' => Dir4.RIGHT,
+                else => continue
+            };
+            initial_guard_pos = Vec2i.new(@intCast(col), @intCast(row));
+            initial_guard_dir = dir;
+            break :looking_for_guard_loop;
+        }
+    } else {
+        return error.NoGuard;
+    }
+
+    const part1_count = try guard_map_count_positions(
+        map,
+        initial_guard_pos, initial_guard_dir,
+        null,
+    ) orelse unreachable;
+
+    var part2_count: i64 = 0;
+    for (0..map.height()) |row| {
+        for (0..map.width_sans_end) |col| {
+            const maybe_count = try guard_map_count_positions(
+                map,
+                initial_guard_pos, initial_guard_dir,
+                Vec2i {.x = @intCast(col), .y = @intCast(row)},
+            );
+            if (maybe_count == null) {
+                part2_count += 1;
+            }
+        }
+    }
+
+    return .{part1_count, part2_count};
+}
+
+fn guard_map_count_positions(
+    map: Str2d,
+    initial_guard_pos: Vec2i, initial_guard_dir: Dir4,
+    obstruction: ?Vec2i,
+) !?i64 {
+    var positions = std.AutoHashMap(Vec2i, u4).init(ally);
+    var guard_pos = initial_guard_pos;
+    var guard_dir: Dir4 = initial_guard_dir;
+    try positions.put(guard_pos, 0);
+    while (true) {
+        // std.debug.print("\n", .{});
+        // for (0..map.height()) |row| {
+        //     for (0..map.width_sans_end) |col| {
+        //         var c = map.index(row, col);
+        //         if (c == '^') {
+        //             c = '.';
+        //         }
+        //         if (row == guard_pos.y and col == guard_pos.x) {
+        //             c = '^';
+        //         }
+        //         std.debug.print("{c}", .{c});
+        //     }
+        //     std.debug.print("\n", .{});
+        // }
+        guard_pos.add(guard_dir.unit_vec());
+        const char =
+            if (obstruction != null and guard_pos.eql(obstruction.?)) '#'
+            else map.get(guard_pos.y, guard_pos.x);
+        switch (char) {
+            '#' => {
+                guard_pos.sub(guard_dir.unit_vec());
+                guard_dir = guard_dir.clockwise();
+            },
+            0 => break,
+            else => {
+                const entry = try positions.getOrPutValue(guard_pos, 0);
+                const bitmask = @as(u4, 1) << @intFromEnum(guard_dir);
+                if (entry.value_ptr.* & bitmask != 0) {
+                    // The guard is in a loop.
+                    return null;
+                }
+                entry.value_ptr.* |= bitmask;
+            }
+        }
+    }
+
+    return positions.count();
+}
+
+const Dir4 = enum {
+    UP, DOWN, LEFT, RIGHT,
+
+    fn clockwise(dir: Dir4) Dir4 {
+        return switch (dir) {
+            .UP => .RIGHT,
+            .RIGHT => .DOWN,
+            .DOWN => .LEFT,
+            .LEFT => .UP,
+        };
+    }
+
+    fn unit_vec(self: Dir4) Vec2i {
+        return switch (self) {
+            .UP => Vec2i.UP,
+            .RIGHT => Vec2i.RIGHT,
+            .DOWN => Vec2i.DOWN,
+            .LEFT => Vec2i.LEFT,
+        };
+    }
+};
+
+const Vec2i = struct {
+    x: i32,
+    y: i32,
+
+    const ZERO = Vec2i.new(0, 0);
+    const UP = Vec2i.new(0, -1);
+    const DOWN = Vec2i.new(0, 1);
+    const LEFT = Vec2i.new(-1, 0);
+    const RIGHT = Vec2i.new(1, 0);
+
+    fn new(x: i32, y: i32) Vec2i {
+        return Vec2i { .x = x, .y = y };
+    }
+
+    fn eql(self: Vec2i, other: Vec2i) bool {
+        return self.x == other.x and self.y == other.y;
+    }
+
+    fn add(self: *Vec2i, other: Vec2i) void {
+        self.x += other.x;
+        self.y += other.y;
+    }
+    fn sub(self: *Vec2i, other: Vec2i) void {
+        self.x -= other.x;
+        self.y -= other.y;
+    }
+};
+
 fn parseI32(buf: []const u8) std.fmt.ParseIntError!i32 {
     return std.fmt.parseInt(i32, buf, 10);
 }
@@ -412,4 +562,53 @@ fn get2d(comptime T: type, slice: []const []const T, i: isize, j: isize, default
 
 fn is_blank(str: []const u8) bool {
     return std.mem.trim(u8, str, " ").len == 0;
+}
+
+const Str2d = struct {
+    str1d: []const u8,
+    width: usize,
+    width_sans_end: usize,
+
+    fn new(str: []const u8) @This() {
+        var self = Str2d {
+            .str1d = str,
+            .width = 0,
+            .width_sans_end = 0,
+        };
+        if (std.mem.indexOf(u8, str, "\r\n")) |line_end_idx| {
+            self.width_sans_end = line_end_idx;
+            self.width = line_end_idx + 2;
+        } else if (std.mem.indexOfScalar(u8, str, '\n')) |line_end_idx| {
+            self.width_sans_end = line_end_idx;
+            self.width = line_end_idx + 1;
+        } else {
+            self.width_sans_end = str.len;
+            self.width = str.len;
+        }
+        return self;
+    }
+
+    fn height(self: @This()) usize {
+        return self.str1d.len / self.width + @as(usize,
+            if (self.str1d.len % self.width == 0) 0
+            else 1
+        );
+    }
+
+    fn index(self: @This(), row: usize, col: usize) u8 {
+        return self.str1d[row * self.width + col];
+    }
+
+    fn get(self: @This(), row: isize, col: isize) u8 {
+        return
+            if (row < 0 or row >= self.height() or col < 0 or col >= self.width_sans_end) 0
+            else self.index(@intCast(row), @intCast(col));
+    }
+};
+
+test "that Str2d works" {
+    const s = Str2d.new("abc\ndef");
+    try std.testing.expectEqual(4, s.width);
+    try std.testing.expectEqual('b', s.index(0, 1));
+    try std.testing.expectEqual('f', s.index(1, 2));
 }
