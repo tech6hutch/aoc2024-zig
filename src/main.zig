@@ -48,6 +48,11 @@ const days = .{
         .answers = .{3119088655389, 264184041398847},
         .test_answers = .{3749, 11387},
     },
+    DayInfo{
+        .f = .{ .one = day8 },
+        .answers = .{371, 1229},
+        .test_answers = .{14, 34},
+    },
 };
 
 pub fn main() !void {
@@ -106,7 +111,9 @@ fn do_solutions(comptime use_example_inputs: bool) !void {
     }
 }
 
-fn day1(input_file: std.fs.File) !struct { i64, i64 } {
+const Answers = struct {i64, i64};
+
+fn day1(input_file: std.fs.File) !Answers {
     var buf_reader = std.io.bufferedReader(input_file.reader());
     var input = buf_reader.reader();
     var buf: [256]u8 = undefined;
@@ -145,7 +152,7 @@ fn day1(input_file: std.fs.File) !struct { i64, i64 } {
     return .{ total_dist, similarity };
 }
 
-fn day2(input_file: std.fs.File) !struct { i64, i64 } {
+fn day2(input_file: std.fs.File) !Answers {
     var buf_reader = std.io.bufferedReader(input_file.reader());
     var input = buf_reader.reader();
     var buf: [256]u8 = undefined;
@@ -200,7 +207,7 @@ fn report_is_safe(reports: []i32) bool {
     return true;
 }
 
-fn day3(input_file: std.fs.File) !struct { i64, i64 } {
+fn day3(input_file: std.fs.File) !Answers {
     // var buf_reader = std.io.bufferedReader(input_file.reader());
     // var input = buf_reader.reader();
     // var buf: [256]u8 = undefined;
@@ -260,7 +267,7 @@ fn day3(input_file: std.fs.File) !struct { i64, i64 } {
     return .{ all_sum, enabled_sum };
 }
 
-fn day4(input_file: std.fs.File) !struct { i64, i64 } {
+fn day4(input_file: std.fs.File) !Answers {
     var lines = std.ArrayList([]const u8).init(ally);
     var lines_iter = std.mem.splitScalar(u8, try input_file.readToEndAlloc(ally, 10_000_000), '\n');
     while (lines_iter.next()) |line| {
@@ -347,7 +354,7 @@ const Day5Rule = struct {
     before: []const u8,
     after: []const u8,
 };
-fn day5(input_file: std.fs.File) !struct { i64, i64 } {
+fn day5(input_file: std.fs.File) !Answers {
     const input = try input_file.readToEndAlloc(ally, 10_000_000);
     var lines_iter = std.mem.tokenizeAny(u8, input, "\r\n");
 
@@ -403,7 +410,7 @@ fn applyRules(rules: []const Day5Rule, lhs: []const u8, rhs: []const u8) bool {
     return false;
 }
 
-fn day6(input_file: std.fs.File) !struct {i64, i64} {
+fn day6(input_file: std.fs.File) !Answers {
     const input_str = try input_file.readToEndAlloc(ally, 10_000_000);
     const map = Str2d.new(input_str);
 
@@ -498,7 +505,7 @@ fn guard_map_count_positions(
     return positions.count();
 }
 
-fn day7(input_file: std.fs.File) !struct {i64, i64} {
+fn day7(input_file: std.fs.File) !Answers {
     const input = try input_file.readToEndAlloc(ally, 10_000_000);
     var line_iter = std.mem.tokenizeAny(u8, input, "\r\n");
     const Equation = struct {
@@ -563,6 +570,97 @@ fn _equation_can_be_true(comptime operations: []const Day7Op, testval: u64, used
     return false;
 }
 
+fn day8(input_file: std.fs.File) !Answers {
+    const map = Str2d.new(try input_file.readToEndAlloc(ally, 10_000_000));
+
+    var antinodes = std.AutoHashMap(Vec2i, void).init(ally);
+    for (0..map.height()) |row1| {
+        for (0..map.width_sans_end) |col1| {
+            const freq1 = map.index(row1, col1);
+            if (!std.ascii.isAlphanumeric(freq1)) continue;
+
+            const pos1 = Vec2i.colrowCast(col1, row1);
+            for (0..map.height()) |row2| {
+                for (0..map.width_sans_end) |col2| {
+                    const freq2 = map.index(row2, col2);
+                    if (!std.ascii.isAlphanumeric(freq2)) continue;
+                    if (freq1 != freq2) continue;
+
+                    const pos2 = Vec2i.colrowCast(col2, row2);
+                    if (pos1.eql(pos2)) continue;
+
+                    const dist = pos2.minus(pos1);
+                    const dist_times_2 = dist.times(Vec2i.new(2, 2));
+                    var pos = pos1.minus(dist_times_2);
+                    const end = pos2.plus(dist_times_2);
+                    while (true) : (pos.add(dist)) {
+                        if (pos.eql(pos1) or pos.eql(pos2)) continue;
+
+                        if (map.inBounds(pos.y, pos.x) and (
+                            pos.minus(pos1).eql(dist) or
+                            pos.minus(pos2).eql(dist)
+                        ) and (
+                            pos.minus(pos1).eql(dist_times_2) or
+                            pos.minus(pos2).eql(dist_times_2)
+                        )) {
+                            try antinodes.put(pos, {});
+                        }
+
+                        if (pos.eql(end)) break;
+                    }
+                }
+            }
+        }
+    }
+    const part1_antinode_count = antinodes.count();
+
+    for (0..map.height()) |row1| {
+        for (0..map.width_sans_end) |col1| {
+            const freq1 = map.index(row1, col1);
+            if (!std.ascii.isAlphanumeric(freq1)) continue;
+
+            const pos1 = Vec2i.colrowCast(col1, row1);
+            for (0..map.height()) |row2| {
+                for (0..map.width_sans_end) |col2| {
+                    const freq2 = map.index(row2, col2);
+                    if (!std.ascii.isAlphanumeric(freq2)) continue;
+                    if (freq1 != freq2) continue;
+
+                    const pos2 = Vec2i.colrowCast(col2, row2);
+                    if (pos1.eql(pos2)) continue;
+
+                    const dist = pos2.minus(pos1);
+                    var pos = pos1;
+                    while (map.inBounds(pos.y, pos.x)) pos.sub(dist);
+                    var end = pos2;
+                    while (map.inBounds(end.y, end.x)) end.add(dist);
+
+                    while (true) : (pos.add(dist)) {
+                        if (map.inBounds(pos.y, pos.x)) {
+                            try antinodes.put(pos, {});
+                        }
+
+                        if (pos.eql(end)) break;
+                    }
+                }
+            }
+        }
+    }
+    const part2_antinode_count = antinodes.count();
+
+    // for (0..map.height()) |row| {
+    //     for (0..map.width_sans_end) |col| {
+    //         std.debug.print("{c}", .{
+    //             if (antinodes.contains(Vec2i.colrowCast(col, row))) '#'
+    //             else map.index(row, col)
+    //         });
+    //     }
+    //     std.debug.print("\n", .{});
+    // }
+
+    return .{part1_antinode_count, part2_antinode_count};
+}
+
 // Helper functions and types
 
 const Dir4 = enum {
@@ -600,9 +698,35 @@ const Vec2i = struct {
     fn new(x: i32, y: i32) Vec2i {
         return Vec2i { .x = x, .y = y };
     }
+    fn colrowCast(col: usize, row: usize) Vec2i {
+        return Vec2i.new(@intCast(col), @intCast(row));
+    }
 
     fn eql(self: Vec2i, other: Vec2i) bool {
         return self.x == other.x and self.y == other.y;
+    }
+
+    fn abs(self: Vec2i) Vec2i {
+        // @abs() returns an unsigned type, so cast to re-"sign" it.
+        return Vec2i {
+            .x = @intCast(@abs(self.x)),
+            .y = @intCast(@abs(self.y)),
+        };
+    }
+
+    fn plus(self: Vec2i, other: Vec2i) Vec2i {
+        return self._mutate_copy(add, other);
+    }
+    fn minus(self: Vec2i, other: Vec2i) Vec2i {
+        return self._mutate_copy(sub, other);
+    }
+    fn times(self: Vec2i, other: Vec2i) Vec2i {
+        return self._mutate_copy(mul, other);
+    }
+    inline fn _mutate_copy(self: Vec2i, op: fn(*Vec2i, Vec2i) void, other: Vec2i) Vec2i {
+        var copy = self;
+        op(&copy, other);
+        return copy;
     }
 
     fn add(self: *Vec2i, other: Vec2i) void {
@@ -613,7 +737,29 @@ const Vec2i = struct {
         self.x -= other.x;
         self.y -= other.y;
     }
+    fn mul(self: *Vec2i, other: Vec2i) void {
+        self.x *= other.x;
+        self.y *= other.y;
+    }
 };
+
+test "mutating vec" {
+    var multest = Vec2i.new(2, 3);
+    multest.mul(Vec2i.new(4, 5));
+    try std.testing.expectEqual(Vec2i.new(8, 15), multest);
+}
+test "vec arithmetic" {
+    const result = Vec2i.new(1, 2).plus(Vec2i.new(3, 4));
+    try std.testing.expectEqual(Vec2i.new(4, 6), result);
+}
+test "vec abs" {
+    const both_neg = Vec2i.new(-2, -3);
+    try std.testing.expectEqual(Vec2i.new(2, 3), both_neg.abs());
+    const one_neg = Vec2i.new(-4, 5);
+    try std.testing.expectEqual(Vec2i.new(4, 5), one_neg.abs());
+    const no_neg = Vec2i.new(6, 7);
+    try std.testing.expectEqual(Vec2i.new(6, 7), no_neg.abs());
+}
 
 inline fn concatenateInts(comptime T: type, a: T, b: T) T {
     var pow: T = 10;
@@ -687,8 +833,12 @@ const Str2d = struct {
     /// Get the char at the row and column if it exists, else the null char.
     fn get(self: @This(), row: isize, col: isize) u8 {
         return
-            if (row < 0 or row >= self.height() or col < 0 or col >= self.width_sans_end) 0
-            else self.index(@intCast(row), @intCast(col));
+            if (self.inBounds(row, col)) self.index(@intCast(row), @intCast(col))
+            else 0;
+    }
+
+    fn inBounds(self: @This(), row: isize, col: isize) bool {
+        return !(row < 0 or row >= self.height() or col < 0 or col >= self.width_sans_end);
     }
 };
 
