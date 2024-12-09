@@ -53,6 +53,11 @@ const days = .{
         .answers = .{371, 1229},
         .test_answers = .{14, 34},
     },
+    DayInfo{
+        .f = .{ .one = day9 },
+        .answers = .{6331212425418, 6363268339304},
+        .test_answers = .{1928, 2858},
+    },
 };
 
 pub fn main() !void {
@@ -71,7 +76,9 @@ fn do_solutions(comptime use_example_inputs: bool) !void {
     var stdout =
         if (use_example_inputs) std.io.getStdErr().writer() else std.io.getStdOut().writer();
 
-    inline for (1..days.len + 1) |day| {
+    // inline for (1..days.len + 1) |day| {
+    {
+        const day = days.len;
         // You can't use continue in an inline loop, for some reason.
         inline_continue: {
             const input_file = std.fs.cwd().openFile(std.fmt.comptimePrint("./{s}/day{d}", .{ if (use_example_inputs) "examples" else "inputs", day }), .{}) catch null;
@@ -661,6 +668,143 @@ fn day8(input_file: std.fs.File) !Answers {
     return .{part1_antinode_count, part2_antinode_count};
 }
 
+fn day9(input_file: std.fs.File) !Answers {
+    var disk_original: []?u32 = undefined;
+    var last_file_id: u32 = undefined;
+    {
+        var disk_dyn = std.ArrayList(?u32).init(ally);
+        var buf_reader = std.io.bufferedReader(input_file.reader());
+        var reader = buf_reader.reader();
+
+        var file_id: u32 = 0;
+        while (reader.readByte()) |byte| {
+            if (!std.ascii.isDigit(byte)) break;
+            const n = byte - '0';
+            // We already advanced by 1, so it's backwards.
+            if (buf_reader.start % 2 != 0) {
+                try disk_dyn.appendNTimes(file_id, n);
+                file_id += 1;
+            } else {
+                try disk_dyn.appendNTimes(null, n);
+            }
+        } else |err| {
+            if (err != error.EndOfStream) return err;
+        }
+        
+        disk_original = try disk_dyn.toOwnedSlice();
+        last_file_id = file_id - 1;
+    }
+    defer ally.free(disk_original);
+
+    const part1_checksum = part1: {
+        const disk = try copySlice(?u32, disk_original, ally);
+        defer ally.free(disk);
+
+        var free_block: usize = 0;
+        var last_block: usize = disk.len - 1;
+        compact_loop: while (true) {
+            while (disk[free_block] != null) {
+                free_block += 1;
+                if (free_block >= disk.len) break :compact_loop;
+            }
+            while (disk[last_block] == null) {
+                if (last_block == 0) break :compact_loop;
+                last_block -= 1;
+            }
+            if (last_block <= free_block) break :compact_loop;
+            disk[free_block] = disk[last_block];
+            disk[last_block] = null;
+        }
+
+        // for (disk) |block| {
+        //     if (block) |n| std.debug.print("{d}", .{n})
+        //     else std.debug.print(".", .{});
+        // }
+        // std.debug.print("\n", .{});
+
+        std.debug.assert(blk: {
+            var i: usize = 0;
+            while (disk[i] != null) {
+                i += 1;
+                if (i >= disk.len) break :blk true;
+            }
+            while (i < disk.len) : (i += 1) {
+                if (disk[i] != null) break :blk false;
+            }
+            break :blk true;
+        });
+
+        break :part1 day9FileChecksum(disk);
+    };
+
+    const part2_checksum = part2: {
+        const disk = try copySlice(?u32, disk_original, ally);
+        defer ally.free(disk);
+
+        var file_id = last_file_id;
+        while (true) {
+            const file_last = std.mem.lastIndexOfScalar(?u32, disk, file_id)
+                orelse unreachable; // end is inclusive
+            const file_first = std.mem.indexOfScalar(?u32, disk, file_id)
+                orelse unreachable;
+            const file_len = file_last - file_first + 1;
+
+            var free_start: usize = 0;
+            var free_end = free_start; // end is exclusive
+            var found_enough_space = false;
+            while (true) {
+                if (free_start >= disk.len) break;
+
+                while (disk[free_start] != null) {
+                    free_start += 1;
+                    if (free_start >= disk.len) break;
+                }
+                free_end = free_start;
+                while (disk[free_end] == null) {
+                    free_end += 1;
+                    if (free_end >= disk.len) break;
+                }
+
+                if (free_end > file_first) {
+                    break;
+                }
+                if (free_end - free_start >= file_len) {
+                    found_enough_space = true;
+                    break;
+                }
+                free_start = free_end;
+            }
+
+            if (found_enough_space) {
+                @memset(disk[free_start..free_start+file_len], file_id);
+                @memset(disk[file_first..file_last+1], null);
+            }
+
+            if (file_id == 0) break;
+            file_id -= 1;
+        }
+
+        // for (disk) |block| {
+        //     if (block) |n| std.debug.print("{d}", .{n})
+        //     else std.debug.print(".", .{});
+        // }
+        // std.debug.print("\n", .{});
+
+        break :part2 day9FileChecksum(disk);
+    };
+
+    return .{part1_checksum, part2_checksum};
+}
+
+fn day9FileChecksum(disk: []const ?u32) i64 {
+    var checksum: i64 = 0;
+    for (0.., disk) |i, block| {
+        const file_id = block orelse continue;
+        checksum += @intCast(i * file_id);
+    }
+    return checksum;
+}
+
 // Helper functions and types
 
 const Dir4 = enum {
@@ -847,4 +991,11 @@ test "that Str2d works" {
     try std.testing.expectEqual(4, s.width);
     try std.testing.expectEqual('b', s.index(0, 1));
     try std.testing.expectEqual('f', s.index(1, 2));
+}
+
+/// Caller owns the returned slice.
+fn copySlice(comptime T: type, src: []const T, allocator: std.mem.Allocator) ![]T {
+    const dst = try allocator.alloc(T, src.len);
+    std.mem.copyForwards(T, dst, src);
+    return dst;
 }
