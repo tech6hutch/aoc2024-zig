@@ -58,6 +58,11 @@ const days = .{
         .answers = .{6331212425418, 6363268339304},
         .test_answers = .{1928, 2858},
     },
+    DayInfo{
+        .f = .{ .one = day10 },
+        .answers = .{811, 1794},
+        .test_answers = .{36, 81},
+    },
 };
 
 pub fn main() !void {
@@ -690,7 +695,7 @@ fn day9(input_file: std.fs.File) !Answers {
         } else |err| {
             if (err != error.EndOfStream) return err;
         }
-        
+
         disk_original = try disk_dyn.toOwnedSlice();
         last_file_id = file_id - 1;
     }
@@ -805,10 +810,88 @@ fn day9FileChecksum(disk: []const ?u32) i64 {
     return checksum;
 }
 
+fn day10(input_file: std.fs.File) !Answers {
+    const map: Array2d(u8) = blk: {
+        const size = try file_get_2d_size(input_file);
+        var map = try Array2d(u8).init(ally, size.line_count, size.line_len);
+
+        try input_file.seekTo(0);
+        var buf_reader = std.io.bufferedReader(input_file.reader());
+        var reader = buf_reader.reader();
+        for (0..map.data.len) |i| {
+            // We should not reach EoF since we already know the length.
+            var c = try reader.readByte();
+            while (c == '\r' or c == '\n') c = try reader.readByte();
+            std.debug.assert(std.ascii.isDigit(c));
+            map.data[i] = c - '0';
+        }
+        break :blk map;
+    };
+
+    var total_score: i64 = 0;
+    var total_rating: i64 = 0;
+    for (0..map.h) |row| {
+        for (0..map.w) |col| {
+            if (map.at(row, col) == 0) {
+                const pos = Vec2i.colrowCast(col, row);
+                total_score += score_trailhead(map, pos);
+                total_rating += rate_trailhead(map, pos);
+            }
+        }
+    }
+
+    return .{total_score, total_rating};
+}
+
+fn score_trailhead(map: Array2d(u8), pos: Vec2i) i64 {
+    var nines_reached = std.ArrayList(Vec2i).init(ally);
+    defer nines_reached.deinit();
+    return _score_trailhead(map, pos, &nines_reached);
+}
+
+fn _score_trailhead(map: Array2d(u8), pos: Vec2i, nines_reached: *std.ArrayList(Vec2i)) i64 {
+    var score: i64 = 0;
+    const height = map.atv(pos);
+    if (height == 9) {
+        for (nines_reached.items) |nine_pos| {
+            if (nine_pos.eql(pos)) return 0;
+        }
+        nines_reached.append(pos)
+            catch |err| std.debug.panic("{any}", .{err});
+        return 1;
+    }
+    for (Dir4.ALL) |dir| {
+        const next_pos = pos.plus(dir.unit_vec());
+        const next_h = map.getv(next_pos) orelse continue;
+        if (next_h == height + 1) {
+            score += _score_trailhead(map, next_pos, nines_reached);
+        }
+    }
+    return score;
+}
+
+fn rate_trailhead(map: Array2d(u8), pos: Vec2i) i64 {
+    var score: i64 = 0;
+    const height = map.atv(pos);
+    if (height == 9) return 1;
+    for (Dir4.ALL) |dir| {
+        const next_pos = pos.plus(dir.unit_vec());
+        const next_h = map.getv(next_pos) orelse continue;
+        if (next_h == height + 1) {
+            score += rate_trailhead(map, next_pos);
+        }
+    }
+    return score;
+}
+
 // Helper functions and types
 
 const Dir4 = enum {
     UP, DOWN, LEFT, RIGHT,
+
+    const ALL = [4]Dir4{
+        Dir4.UP, Dir4.DOWN, Dir4.LEFT, Dir4.RIGHT,
+    };
 
     fn clockwise(dir: Dir4) Dir4 {
         return switch (dir) {
@@ -905,35 +988,6 @@ test "vec abs" {
     try std.testing.expectEqual(Vec2i.new(6, 7), no_neg.abs());
 }
 
-inline fn concatenateInts(comptime T: type, a: T, b: T) T {
-    var pow: T = 10;
-    while (b >= pow) pow *= 10;
-    return a * pow + b;
-}
-
-test "concatenating integers" {
-    try std.testing.expectEqual(123456, concatenateInts(u32, 123, 456));
-}
-
-fn parseI32(buf: []const u8) std.fmt.ParseIntError!i32 {
-    return std.fmt.parseInt(i32, buf, 10);
-}
-
-/// Parses out an int of the given type, until it encounters a non-digit char.
-fn parseIntUntilItsEnd(comptime T: type, buf: []const u8) std.fmt.ParseIntError!struct {T, usize} {
-    var end: usize = 0;
-    while (end < buf.len and std.ascii.isDigit(buf[end])) end += 1;
-    const n = try std.fmt.parseInt(T, buf[0..end], 10);
-    return .{n, end};
-}
-
-/// Gets a value from a 2D slice if within bounds, else the given default.
-fn get2d(comptime T: type, slice: []const []const T, i: isize, j: isize, default: T) T {
-    return
-        if (i < 0 or i >= slice.len or j < 0 or j >= slice[@intCast(i)].len) default
-        else slice[@intCast(i)][@intCast(j)];
-}
-
 /// A wrapper to treat a 1D string as being 2D, with the lines as rows. The
 /// lines must be the same length.
 const Str2d = struct {
@@ -993,9 +1047,150 @@ test "that Str2d works" {
     try std.testing.expectEqual('f', s.index(1, 2));
 }
 
+fn Array2d(comptime T: type) type {
+    return struct {
+        data: []T,
+        h: usize,
+        w: usize,
+
+        const Self = @This();
+
+        fn init(allocator: std.mem.Allocator, h: usize, w: usize) std.mem.Allocator.Error!Self {
+            return Self {
+                .data = try allocator.alloc(T, h * w),
+                .h = h,
+                .w = w,
+            };
+        }
+
+        fn at(self: Self, row: usize, col: usize) T {
+            return self.data[row * self.w + col];
+        }
+        fn atv(self: Self, v: Vec2i) T {
+            std.debug.assert(v.x >= 0 and v.y >= 0);
+            return self.at(@intCast(v.y), @intCast(v.x));
+        }
+
+        fn get(self: Self, row: usize, col: usize) ?T {
+            return
+                if (self.inBounds(row, col)) self.at(row, col)
+                else null;
+        }
+        fn getv(self: Self, v: Vec2i) ?T {
+            if (v.x < 0 or v.y < 0) return null;
+            return self.get(@intCast(v.y), @intCast(v.x));
+        }
+
+        fn getOrDefault(self: Self, row: usize, col: usize, default: T) T {
+            return self.get(row, col) orelse default;
+        }
+
+        fn inBounds(self: Self, row: usize, col: usize) bool {
+            return !(row < 0 or row >= self.h or col < 0 or col >= self.w);
+        }
+    };
+}
+
+test "that Array2d works" {
+    var arr = try Array2d(u8).init(ally, 2, 3);
+    @memcpy(arr.data, &[_]u8{
+        'a', 'b', 'c',
+        'd', 'e', 'f',
+    });
+    try std.testing.expectEqual(3, arr.w);
+    try std.testing.expectEqual('b', arr.at(0, 1));
+    try std.testing.expectEqual('f', arr.at(1, 2));
+    try std.testing.expectEqual('n', arr.getOrDefault(9, 9, 'n'));
+}
+
+/// Gets a value from a 2D slice if within bounds, else the given default.
+fn get2d(comptime T: type, slice: []const []const T, i: isize, j: isize, default: T) T {
+    return
+        if (i < 0 or i >= slice.len or j < 0 or j >= slice[@intCast(i)].len) default
+        else slice[@intCast(i)][@intCast(j)];
+}
+
+fn parseI32(buf: []const u8) std.fmt.ParseIntError!i32 {
+    return std.fmt.parseInt(i32, buf, 10);
+}
+
+/// Parses out an int of the given type, until it encounters a non-digit char.
+fn parseIntUntilItsEnd(comptime T: type, buf: []const u8) std.fmt.ParseIntError!struct {T, usize} {
+    var end: usize = 0;
+    while (end < buf.len and std.ascii.isDigit(buf[end])) end += 1;
+    const n = try std.fmt.parseInt(T, buf[0..end], 10);
+    return .{n, end};
+}
+
+inline fn concatenateInts(comptime T: type, a: T, b: T) T {
+    var pow: T = 10;
+    while (b >= pow) pow *= 10;
+    return a * pow + b;
+}
+
+test "concatenating integers" {
+    try std.testing.expectEqual(123456, concatenateInts(u32, 123, 456));
+}
+
 /// Caller owns the returned slice.
 fn copySlice(comptime T: type, src: []const T, allocator: std.mem.Allocator) ![]T {
     const dst = try allocator.alloc(T, src.len);
     std.mem.copyForwards(T, dst, src);
     return dst;
+}
+
+const FileSize2d = struct {
+    line_len: usize,
+    line_count: usize,
+};
+fn file_get_2d_size(file: std.fs.File) !FileSize2d {
+    var buf_reader = std.io.bufferedReader(file.reader());
+    var reader = buf_reader.reader();
+
+    var line_len: usize = 0;
+    while (reader.readByte()) |byte| {
+        switch (byte) {
+            '\r' => {
+                const byte2 = reader.readByte()
+                    catch |err|
+                        if (err == error.EndOfStream) 0
+                        else return err;
+                if (byte2 != '\n') {
+                    return error.MalformedNewline;
+                }
+                break;
+            },
+            '\n' => {
+                break;
+            },
+            else => line_len += 1,
+        }
+    } else |err| {
+        if (err != error.EndOfStream) return err;
+    }
+
+    if (line_len == 0) return FileSize2d {
+        .line_len = 0,
+        .line_count = 0,
+    };
+
+    var line_count: usize = 1;
+    while (true) {
+        reader.skipBytes(line_len, .{})
+            catch |err| if (err == error.EndOfStream) break else return err;
+        line_count += 1;
+        var c = reader.readByte() catch |err| if (err == error.EndOfStream) break else return err;
+        if (c == '\r') {
+            c = reader.readByte() catch |err| if (err == error.EndOfStream) break else return err;
+        }
+        if (c != '\n') {
+            return error.MalformedNewline;
+        }
+    }
+
+    std.debug.assert(reader.readByte() == error.EndOfStream);
+    return FileSize2d {
+        .line_len = line_len,
+        .line_count = line_count,
+    };
 }
