@@ -63,6 +63,11 @@ const days = .{
         .answers = .{811, 1794},
         .test_answers = .{36, 81},
     },
+    DayInfo{
+        .f = .{ .one = day11 },
+        .answers = .{216996, 257335372288947},
+        .test_answers = .{55312, -1},
+    },
 };
 
 pub fn main() !void {
@@ -884,6 +889,107 @@ fn rate_trailhead(map: Array2d(u8), pos: Vec2i) i64 {
     return score;
 }
 
+fn day11(input_file: std.fs.File) !Answers {
+    var stones = std.ArrayList(u64).init(ally);
+    {
+        const input = try input_file.readToEndAlloc(ally, 10_000_000);
+        var iter = std.mem.tokenizeScalar(u8, input, ' ');
+        while (iter.next()) |raw_str| {
+            const str = std.mem.trim(u8, raw_str, "\r\n");
+            if (str.len == 0) continue;
+            const n = try std.fmt.parseInt(u64, str, 10);
+            try stones.append(n);
+        }
+    }
+
+    // Part 1 solution. Not efficient enough for part 2.
+    // for (0..75) |_| {
+    //     var i = stones.items.len;
+    //     while (i > 0) {
+    //         i -= 1;
+    //         const stone = stones.items[i];
+    //         if (stone == 0) {
+    //             stones.items[i] = 1;
+    //         } else if (countDigits(u64, stone) % 2 == 0) {
+    //             const new1, const new2 = splitDigitsInHalf(u64, stone);
+    //             stones.items[i] = new1;
+    //             try stones.insert(i + 1, new2);
+    //         } else {
+    //             stones.items[i] *= 2024;
+    //         }
+    //     }
+    // }
+
+    // for (stones.items) |stone| {
+    //     std.debug.print("{d} ", .{stone});
+    // }
+    // std.debug.print("\n", .{});
+
+    const CountStonesInput = struct {
+        stone: u64,
+        generations: u64,
+
+        const Self = @This();
+
+        fn nextGen(self: *const Self, new_stone: u64) Self {
+            return Self {
+                .stone = new_stone,
+                .generations = self.generations - 1,
+            };
+        }
+    };
+    const StoneCounter = struct {
+        cache: Cache,
+
+        const Self = @This();
+        const Cache = std.AutoHashMap(CountStonesInput, u64);
+
+        fn countStones(self: *Self, in: CountStonesInput) u64 {
+            return switch (in.generations) {
+                0 => 1,
+                1 => self.applyRules(in),
+                else => {
+                    if (!self.cache.contains(in)) {
+                        self.cache.put(in, self.applyRules(in))
+                            catch |err| std.debug.panic("{any}", .{err});
+                    }
+                    return self.cache.get(in).?;
+                }
+            };
+        }
+
+        fn applyRules(self: *Self, in: CountStonesInput) u64 {
+            if (in.stone == 0) return self.countStones(in.nextGen(1));
+            if (countDigits(u64, in.stone) % 2 == 0) {
+                const new1, const new2 = splitDigitsInHalf(u64, in.stone);
+                return self.countStones(in.nextGen(new1))
+                    + self.countStones(in.nextGen(new2));
+            }
+            return self.countStones(in.nextGen(in.stone * 2024));
+        }
+    };
+
+    var stone_counter = StoneCounter {
+        .cache = StoneCounter.Cache.init(ally),
+    };
+    var part1_count: u64 = 0;
+    for (stones.items) |stone| {
+        part1_count += stone_counter.countStones(CountStonesInput {
+            .stone = stone,
+            .generations = 25,
+        });
+    }
+    var part2_count: u64 = 0;
+    for (stones.items) |stone| {
+        part2_count += stone_counter.countStones(CountStonesInput {
+            .stone = stone,
+            .generations = 75,
+        });
+    }
+
+    return .{@intCast(part1_count), @intCast(part2_count)};
+}
+
 // Helper functions and types
 
 const Dir4 = enum {
@@ -1120,6 +1226,43 @@ fn parseIntUntilItsEnd(comptime T: type, buf: []const u8) std.fmt.ParseIntError!
     while (end < buf.len and std.ascii.isDigit(buf[end])) end += 1;
     const n = try std.fmt.parseInt(T, buf[0..end], 10);
     return .{n, end};
+}
+
+fn splitDigitsInHalf(comptime T: type, n: T) struct {T, T} {
+    const t_info = @typeInfo(T);
+    if (t_info != .Int or t_info.Int.signedness != .unsigned) {
+        @compileError("unsigned int only");
+    }
+    std.debug.assert(countDigits(T, n) % 2 == 0);
+    const half = std.math.powi(T, 10, countDigits(T, n) / 2) catch unreachable;
+    return .{n / half, n % half};
+}
+
+test "splitting digits" {
+    try std.testing.expectEqualDeep(.{1, 2}, splitDigitsInHalf(u32, 12));
+    try std.testing.expectEqualDeep(.{9, 9}, splitDigitsInHalf(u32, 99));
+    try std.testing.expectEqualDeep(.{12, 34}, splitDigitsInHalf(u32, 1234));
+}
+
+fn countDigits(comptime T: type, n: T) T {
+    var digits: T = 1;
+    while (std.math.powi(T, 10, digits) catch unreachable <= n) digits += 1;
+    return digits;
+}
+
+test "counting digits" {
+    for (0..10) |n| {
+        try std.testing.expectEqual(1, countDigits(usize, n));
+    }
+
+    try std.testing.expectEqual(2, countDigits(u32, 10));
+    try std.testing.expectEqual(2, countDigits(u32, 11));
+    try std.testing.expectEqual(2, countDigits(u32, 19));
+    try std.testing.expectEqual(2, countDigits(u32, 20));
+    try std.testing.expectEqual(2, countDigits(u32, 50));
+    try std.testing.expectEqual(2, countDigits(u32, 99));
+
+    try std.testing.expectEqual(3, countDigits(u32, 100));
 }
 
 inline fn concatenateInts(comptime T: type, a: T, b: T) T {
