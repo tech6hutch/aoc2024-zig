@@ -70,7 +70,8 @@ const days = .{
     },
     DayInfo{
         .f = .{ .one = Day12.day12 },
-        .test_answers = .{1930, -1},
+        .answers = .{1433460, -1},
+        .test_answers = .{1930, 1206},
     },
 };
 
@@ -996,129 +997,75 @@ fn day11(input_file: std.fs.File) !Answers {
 
 const Day12 = struct {
     map: Str2d,
-    map_meta: Array2d(PlotMeta),
+    regions: std.ArrayList(Region),
+    in_a_region: Array2d(bool),
 
     const Self = @This();
 
-    const RegionId = u8;
-    const PlotMeta = struct {
-        region: RegionId = 0,
-        fence: packed struct(u8) {
-            top: bool,
-            right: bool,
-            bottom: bool,
-            left: bool,
-            _padding: u4,
-        } = .{
-            .top = false,
-            .right = false,
-            .bottom = false,
-            .left = false,
-            ._padding = 0,
-        },
-        inline fn fences(self: *const @This()) u8 {
-            return @bitCast(self.fence);
-        }
+    const Region = struct {
+        plant: u8,
+        plots: std.ArrayList(Vec2u16),
     };
 
     fn day12(input_file: std.fs.File) !Answers {
         var self = Self {
             .map = Str2d.new(try input_file.readToEndAlloc(ally, 10_000_000)),
-            .map_meta = undefined,
+            .regions = std.ArrayList(Region).init(ally),
+            .in_a_region = undefined,
         };
-        self.map_meta = try Array2d(PlotMeta).init(ally,
-            self.map.height(), self.map.width_sans_end);
-        @memset(self.map_meta.data, PlotMeta {});
+        self.in_a_region = try Array2d(bool).init(ally, self.map.height(), self.map.width_sans_end);
 
-        // Keep track of region for each plot
-        var next_region_id: RegionId = 1;
+        // Keep track of plots in each region
         for (0..self.map.height()) |row| {
             for (0..self.map.width_sans_end) |col| {
                 // If the plot is in a group, it's already processed.
-                if (self.map_meta.at(row, col).region != 0) continue;
+                if (self.in_a_region.at(row, col)) continue;
 
-                self.regionMarkAll(Vec2i.colrowCast(col, row), next_region_id);
-                next_region_id += 1;
+                try self.regions.append(Region {
+                    .plant = self.map.at(row, col),
+                    .plots = std.ArrayList(Vec2u16).init(ally),
+                });
+                try self.regionMarkAll(Vec2i.colrowCast(col, row));
             }
         }
-
-        // Calculate fences, if any, for each plot
-        for (0..self.map.height()) |row| {
-            for (0..self.map.width_sans_end) |col| {
-                const pos = Vec2i.colrowCast(col, row);
-                var meta = self.map_meta.mutv(pos);
-                inline for (Dir4.ALL) |dir| {
-                    const neighbor_pos = pos.plus(dir.unit_vec());
-                    var build_fence = false;
-                    if (self.map_meta.getv(neighbor_pos)) |neighbor_meta| {
-                        if (neighbor_meta.region != meta.region) build_fence = true;
-                    } else {
-                        build_fence = true;
-                    }
-                    if (build_fence) switch (dir) {
-                        Dir4.LEFT => meta.fence.left = true,
-                        Dir4.UP => meta.fence.top = true,
-                        Dir4.RIGHT => meta.fence.right = true,
-                        Dir4.DOWN => meta.fence.bottom = true,
-                    };
-                }
-            }
-        }
+        std.debug.assert(std.mem.allEqual(bool, self.in_a_region.data, true));
 
         // Calculate perimeter and area for each region
         var total_price: i64 = 0;
-        for (1..next_region_id) |region_id_usize| {
-            const region_id: RegionId = @intCast(region_id_usize);
-
-            var a_pos_in_region: Vec2i = undefined;
-            find_loop: for (0..self.map_meta.h) |row| for (0..self.map_meta.w) |col| {
-                if (self.map_meta.at(row, col).region == region_id) {
-                    a_pos_in_region = Vec2i.colrowCast(col, row);
-                    break :find_loop;
+        for (self.regions.items) |region| {
+            var region_perimeter: u32 = 0;
+            for (region.plots.items) |pos_u16| {
+                const pos: Vec2i = pos_u16.intCast(i32);
+                for (Dir4.ALL) |dir| {
+                    if (self.map.getv(pos.plus(dir.unit_vec())) != region.plant) {
+                        region_perimeter += 1;
+                    }
                 }
-            } else {
-                unreachable;
-            };
-
-            const region_perimeter = self.regionCountPerimeter(a_pos_in_region, region_id);
-            const region_area = self.regionCountArea(a_pos_in_region, region_id);
-            total_price += region_perimeter * region_area;
+            }
+            const region_area = region.plots.items.len;
+            total_price += region_perimeter * @as(i64, @intCast(region_area));
         }
+
+        // Part 2 ideas:
+        // Movement Dir4 and affix Dir4
+        // around the outside of the edge of a region
+        // when reaching plots not of the region, affix = movement and movement = affix.opposite()
 
         return .{total_price, -1};
     }
 
-    fn regionMarkAll(self: *Self, start_pos: Vec2i, region_id: RegionId) void {
+    fn regionMarkAll(self: *Self, start_pos: Vec2i) !void {
+        if (self.in_a_region.atv(start_pos)) return;
+        self.in_a_region.mutv(start_pos).* = true;
+
+        try self.regions.items[self.regions.items.len-1].plots.append(start_pos.intCast(u16));
         const plot = self.map.atv(start_pos);
-        self.map_meta.mutv(start_pos).region = region_id;
         for (Dir4.ALL) |dir| {
             const pos = start_pos.plus(dir.unit_vec());
             if (self.map.getv(pos) == plot) {
-                self.regionMarkAll(pos, region_id);
+                try self.regionMarkAll(pos);
             }
         }
-    }
-
-    fn regionCountPerimeter(self: *const Self, start_pos: Vec2i, region_id: RegionId) u32 {
-        var count: u32 = @popCount(self.map_meta.atv(start_pos).fences());
-        for (Dir4.ALL) |dir| {
-            const pos = start_pos.plus(dir.unit_vec());
-            if (self.map_meta.atv(pos).region == region_id) {
-                count += self.regionCountPerimeter(pos, region_id);
-            }
-        }
-        return count;
-    }
-
-    fn regionCountArea(self: *const Self, start_pos: Vec2i, region_id: RegionId) u32 {
-        var count: u32 = 1;
-        for (Dir4.ALL) |dir| {
-            const pos = start_pos.plus(dir.unit_vec());
-            if (self.map_meta.atv(pos).region == region_id) {
-                count += self.regionCountArea(pos, region_id);
-            }
-        }
-        return count;
     }
 };
 
@@ -1150,63 +1097,77 @@ const Dir4 = enum {
     }
 };
 
-const Vec2i = struct {
-    x: i32,
-    y: i32,
+const Vec2i = GenericVec2(i32);
+const Vec2u16 = GenericVec2(u16);
 
-    const ZERO = Vec2i.new(0, 0);
-    const UP = Vec2i.new(0, -1);
-    const DOWN = Vec2i.new(0, 1);
-    const LEFT = Vec2i.new(-1, 0);
-    const RIGHT = Vec2i.new(1, 0);
+fn GenericVec2(comptime T: type) type {
+    return struct {
+        x: T,
+        y: T,
 
-    fn new(x: i32, y: i32) Vec2i {
-        return Vec2i { .x = x, .y = y };
-    }
-    fn colrowCast(col: usize, row: usize) Vec2i {
-        return Vec2i.new(@intCast(col), @intCast(row));
-    }
+        const Self = @This();
 
-    fn eql(self: Vec2i, other: Vec2i) bool {
-        return self.x == other.x and self.y == other.y;
-    }
+        const ZERO = Self.new(0, 0);
+        const UP = Self.new(0, -1);
+        const DOWN = Self.new(0, 1);
+        const LEFT = Self.new(-1, 0);
+        const RIGHT = Self.new(1, 0);
 
-    fn abs(self: Vec2i) Vec2i {
-        // @abs() returns an unsigned type, so cast to re-"sign" it.
-        return Vec2i {
-            .x = @intCast(@abs(self.x)),
-            .y = @intCast(@abs(self.y)),
-        };
-    }
+        fn new(x: T, y: T) Self {
+            return Self { .x = x, .y = y };
+        }
+        fn colrowCast(col: usize, row: usize) Self {
+            return Self.new(@intCast(col), @intCast(row));
+        }
 
-    fn plus(self: Vec2i, other: Vec2i) Vec2i {
-        return self._mutate_copy(add, other);
-    }
-    fn minus(self: Vec2i, other: Vec2i) Vec2i {
-        return self._mutate_copy(sub, other);
-    }
-    fn times(self: Vec2i, other: Vec2i) Vec2i {
-        return self._mutate_copy(mul, other);
-    }
-    inline fn _mutate_copy(self: Vec2i, op: fn(*Vec2i, Vec2i) void, other: Vec2i) Vec2i {
-        var copy = self;
-        op(&copy, other);
-        return copy;
-    }
+        fn intCast(self: Self, comptime NewT: type) GenericVec2(NewT) {
+            return GenericVec2(NewT) {
+                .x = @intCast(self.x),
+                .y = @intCast(self.y),
+            };
+        }
 
-    fn add(self: *Vec2i, other: Vec2i) void {
-        self.x += other.x;
-        self.y += other.y;
-    }
-    fn sub(self: *Vec2i, other: Vec2i) void {
-        self.x -= other.x;
-        self.y -= other.y;
-    }
-    fn mul(self: *Vec2i, other: Vec2i) void {
-        self.x *= other.x;
-        self.y *= other.y;
-    }
-};
+        fn eql(self: Self, other: Self) bool {
+            return self.x == other.x and self.y == other.y;
+        }
+
+        fn abs(self: Self) Self {
+            // @abs() returns an unsigned type, so cast to re-"sign" it.
+            return Self {
+                .x = @intCast(@abs(self.x)),
+                .y = @intCast(@abs(self.y)),
+            };
+        }
+
+        fn plus(self: Self, other: Self) Self {
+            return self._mutate_copy(add, other);
+        }
+        fn minus(self: Self, other: Self) Self {
+            return self._mutate_copy(sub, other);
+        }
+        fn times(self: Self, other: Self) Self {
+            return self._mutate_copy(mul, other);
+        }
+        inline fn _mutate_copy(self: Self, op: fn(*Self, Self) void, other: Self) Self {
+            var copy = self;
+            op(&copy, other);
+            return copy;
+        }
+
+        fn add(self: *Self, other: Self) void {
+            self.x += other.x;
+            self.y += other.y;
+        }
+        fn sub(self: *Self, other: Self) void {
+            self.x -= other.x;
+            self.y -= other.y;
+        }
+        fn mul(self: *Self, other: Self) void {
+            self.x *= other.x;
+            self.y *= other.y;
+        }
+    };
+}
 
 test "mutating vec" {
     var multest = Vec2i.new(2, 3);
