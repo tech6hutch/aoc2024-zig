@@ -68,6 +68,10 @@ const days = .{
         .answers = .{216996, 257335372288947},
         .test_answers = .{55312, -1},
     },
+    DayInfo{
+        .f = .{ .one = Day12.day12 },
+        .test_answers = .{1930, -1},
+    },
 };
 
 pub fn main() !void {
@@ -435,7 +439,7 @@ fn day6(input_file: std.fs.File) !Answers {
     var initial_guard_dir: Dir4 = undefined;
     looking_for_guard_loop: for (0..map.height()) |row| {
         for (0..map.width_sans_end) |col| {
-            const dir = switch (map.index(row, col)) {
+            const dir = switch (map.at(row, col)) {
                 '^' => Dir4.UP,
                 'v' => Dir4.DOWN,
                 '<' => Dir4.LEFT,
@@ -593,13 +597,13 @@ fn day8(input_file: std.fs.File) !Answers {
     var antinodes = std.AutoHashMap(Vec2i, void).init(ally);
     for (0..map.height()) |row1| {
         for (0..map.width_sans_end) |col1| {
-            const freq1 = map.index(row1, col1);
+            const freq1 = map.at(row1, col1);
             if (!std.ascii.isAlphanumeric(freq1)) continue;
 
             const pos1 = Vec2i.colrowCast(col1, row1);
             for (0..map.height()) |row2| {
                 for (0..map.width_sans_end) |col2| {
-                    const freq2 = map.index(row2, col2);
+                    const freq2 = map.at(row2, col2);
                     if (!std.ascii.isAlphanumeric(freq2)) continue;
                     if (freq1 != freq2) continue;
 
@@ -633,13 +637,13 @@ fn day8(input_file: std.fs.File) !Answers {
 
     for (0..map.height()) |row1| {
         for (0..map.width_sans_end) |col1| {
-            const freq1 = map.index(row1, col1);
+            const freq1 = map.at(row1, col1);
             if (!std.ascii.isAlphanumeric(freq1)) continue;
 
             const pos1 = Vec2i.colrowCast(col1, row1);
             for (0..map.height()) |row2| {
                 for (0..map.width_sans_end) |col2| {
-                    const freq2 = map.index(row2, col2);
+                    const freq2 = map.at(row2, col2);
                     if (!std.ascii.isAlphanumeric(freq2)) continue;
                     if (freq1 != freq2) continue;
 
@@ -990,6 +994,134 @@ fn day11(input_file: std.fs.File) !Answers {
     return .{@intCast(part1_count), @intCast(part2_count)};
 }
 
+const Day12 = struct {
+    map: Str2d,
+    map_meta: Array2d(PlotMeta),
+
+    const Self = @This();
+
+    const RegionId = u8;
+    const PlotMeta = struct {
+        region: RegionId = 0,
+        fence: packed struct(u8) {
+            top: bool,
+            right: bool,
+            bottom: bool,
+            left: bool,
+            _padding: u4,
+        } = .{
+            .top = false,
+            .right = false,
+            .bottom = false,
+            .left = false,
+            ._padding = 0,
+        },
+        inline fn fences(self: *const @This()) u8 {
+            return @bitCast(self.fence);
+        }
+    };
+
+    fn day12(input_file: std.fs.File) !Answers {
+        var self = Self {
+            .map = Str2d.new(try input_file.readToEndAlloc(ally, 10_000_000)),
+            .map_meta = undefined,
+        };
+        self.map_meta = try Array2d(PlotMeta).init(ally,
+            self.map.height(), self.map.width_sans_end);
+        @memset(self.map_meta.data, PlotMeta {});
+
+        // Keep track of region for each plot
+        var next_region_id: RegionId = 1;
+        for (0..self.map.height()) |row| {
+            for (0..self.map.width_sans_end) |col| {
+                // If the plot is in a group, it's already processed.
+                if (self.map_meta.at(row, col).region != 0) continue;
+
+                self.regionMarkAll(Vec2i.colrowCast(col, row), next_region_id);
+                next_region_id += 1;
+            }
+        }
+
+        // Calculate fences, if any, for each plot
+        for (0..self.map.height()) |row| {
+            for (0..self.map.width_sans_end) |col| {
+                const pos = Vec2i.colrowCast(col, row);
+                var meta = self.map_meta.mutv(pos);
+                inline for (Dir4.ALL) |dir| {
+                    const neighbor_pos = pos.plus(dir.unit_vec());
+                    var build_fence = false;
+                    if (self.map_meta.getv(neighbor_pos)) |neighbor_meta| {
+                        if (neighbor_meta.region != meta.region) build_fence = true;
+                    } else {
+                        build_fence = true;
+                    }
+                    if (build_fence) switch (dir) {
+                        Dir4.LEFT => meta.fence.left = true,
+                        Dir4.UP => meta.fence.top = true,
+                        Dir4.RIGHT => meta.fence.right = true,
+                        Dir4.DOWN => meta.fence.bottom = true,
+                    };
+                }
+            }
+        }
+
+        // Calculate perimeter and area for each region
+        var total_price: i64 = 0;
+        for (1..next_region_id) |region_id_usize| {
+            const region_id: RegionId = @intCast(region_id_usize);
+
+            var a_pos_in_region: Vec2i = undefined;
+            find_loop: for (0..self.map_meta.h) |row| for (0..self.map_meta.w) |col| {
+                if (self.map_meta.at(row, col).region == region_id) {
+                    a_pos_in_region = Vec2i.colrowCast(col, row);
+                    break :find_loop;
+                }
+            } else {
+                unreachable;
+            };
+
+            const region_perimeter = self.regionCountPerimeter(a_pos_in_region, region_id);
+            const region_area = self.regionCountArea(a_pos_in_region, region_id);
+            total_price += region_perimeter * region_area;
+        }
+
+        return .{total_price, -1};
+    }
+
+    fn regionMarkAll(self: *Self, start_pos: Vec2i, region_id: RegionId) void {
+        const plot = self.map.atv(start_pos);
+        self.map_meta.mutv(start_pos).region = region_id;
+        for (Dir4.ALL) |dir| {
+            const pos = start_pos.plus(dir.unit_vec());
+            if (self.map.getv(pos) == plot) {
+                self.regionMarkAll(pos, region_id);
+            }
+        }
+    }
+
+    fn regionCountPerimeter(self: *const Self, start_pos: Vec2i, region_id: RegionId) u32 {
+        var count: u32 = @popCount(self.map_meta.atv(start_pos).fences());
+        for (Dir4.ALL) |dir| {
+            const pos = start_pos.plus(dir.unit_vec());
+            if (self.map_meta.atv(pos).region == region_id) {
+                count += self.regionCountPerimeter(pos, region_id);
+            }
+        }
+        return count;
+    }
+
+    fn regionCountArea(self: *const Self, start_pos: Vec2i, region_id: RegionId) u32 {
+        var count: u32 = 1;
+        for (Dir4.ALL) |dir| {
+            const pos = start_pos.plus(dir.unit_vec());
+            if (self.map_meta.atv(pos).region == region_id) {
+                count += self.regionCountArea(pos, region_id);
+            }
+        }
+        return count;
+    }
+};
+
 // Helper functions and types
 
 const Dir4 = enum {
@@ -1103,7 +1235,7 @@ const Str2d = struct {
     /// Printable line width (excluding newline char(s)).
     width_sans_end: usize,
 
-    fn new(str: []const u8) @This() {
+    fn new(str: []const u8) Str2d {
         var self = Str2d {
             .str1d = str,
             .width = 0,
@@ -1122,7 +1254,7 @@ const Str2d = struct {
         return self;
     }
 
-    fn height(self: @This()) usize {
+    fn height(self: *const Str2d) usize {
         return self.str1d.len / self.width + @as(usize,
             if (self.str1d.len % self.width == 0) 0
             else 1
@@ -1130,18 +1262,30 @@ const Str2d = struct {
     }
 
     /// Directly index the string. Like usual, this will panic or cause illegal behavior if out of bounds.
-    fn index(self: @This(), row: usize, col: usize) u8 {
+    fn at(self: *const Str2d, row: usize, col: usize) u8 {
         return self.str1d[row * self.width + col];
+    }
+    fn atv(self: *const Str2d, v: Vec2i) u8 {
+        std.debug.assert(v.x >= 0 and v.y >= 0);
+        return self.at(@intCast(v.y), @intCast(v.x));
     }
 
     /// Get the char at the row and column if it exists, else the null char.
-    fn get(self: @This(), row: isize, col: isize) u8 {
+    fn get(self: *const Str2d, row: isize, col: isize) u8 {
         return
-            if (self.inBounds(row, col)) self.index(@intCast(row), @intCast(col))
+            if (self.inBounds(row, col)) self.at(@intCast(row), @intCast(col))
             else 0;
     }
+    fn getv(self: *const Str2d, v: Vec2i) u8 {
+        return self.get(@intCast(v.y), @intCast(v.x));
+    }
 
-    fn inBounds(self: @This(), row: isize, col: isize) bool {
+    fn inBounds(self: *const Str2d, row: isize, col: isize) bool {
+        return !(row < 0 or row >= self.height() or col < 0 or col >= self.width_sans_end);
+    }
+    fn inBoundsv(self: *const Str2d, v: Vec2i) bool {
+        const row = v.y;
+        const col = v.x;
         return !(row < 0 or row >= self.height() or col < 0 or col >= self.width_sans_end);
     }
 };
@@ -1149,8 +1293,8 @@ const Str2d = struct {
 test "that Str2d works" {
     const s = Str2d.new("abc\ndef");
     try std.testing.expectEqual(4, s.width);
-    try std.testing.expectEqual('b', s.index(0, 1));
-    try std.testing.expectEqual('f', s.index(1, 2));
+    try std.testing.expectEqual('b', s.at(0, 1));
+    try std.testing.expectEqual('f', s.at(1, 2));
 }
 
 fn Array2d(comptime T: type) type {
@@ -1169,29 +1313,44 @@ fn Array2d(comptime T: type) type {
             };
         }
 
-        fn at(self: Self, row: usize, col: usize) T {
+        fn at(self: *const Self, row: usize, col: usize) T {
             return self.data[row * self.w + col];
         }
-        fn atv(self: Self, v: Vec2i) T {
+        fn atv(self: *const Self, v: Vec2i) T {
             std.debug.assert(v.x >= 0 and v.y >= 0);
             return self.at(@intCast(v.y), @intCast(v.x));
         }
+        fn mut(self: *const Self, row: usize, col: usize) *T {
+            return &self.data[row * self.w + col];
+        }
+        fn mutv(self: *const Self, v: Vec2i) *T {
+            std.debug.assert(v.x >= 0 and v.y >= 0);
+            return self.mut(@intCast(v.y), @intCast(v.x));
+        }
 
-        fn get(self: Self, row: usize, col: usize) ?T {
+        fn set(self: *Self, row: usize, col: usize, value: T) void {
+            self.data[row * self.w + col] = value;
+        }
+        fn setv(self: *Self, v: Vec2i, value: T) void {
+            std.debug.assert(v.x >= 0 and v.y >= 0);
+            return self.set(@intCast(v.y), @intCast(v.x), value);
+        }
+
+        fn get(self: *const Self, row: usize, col: usize) ?T {
             return
                 if (self.inBounds(row, col)) self.at(row, col)
                 else null;
         }
-        fn getv(self: Self, v: Vec2i) ?T {
+        fn getv(self: *const Self, v: Vec2i) ?T {
             if (v.x < 0 or v.y < 0) return null;
             return self.get(@intCast(v.y), @intCast(v.x));
         }
 
-        fn getOrDefault(self: Self, row: usize, col: usize, default: T) T {
+        fn getOrDefault(self: *const Self, row: usize, col: usize, default: T) T {
             return self.get(row, col) orelse default;
         }
 
-        fn inBounds(self: Self, row: usize, col: usize) bool {
+        fn inBounds(self: *const Self, row: usize, col: usize) bool {
             return !(row < 0 or row >= self.h or col < 0 or col >= self.w);
         }
     };
