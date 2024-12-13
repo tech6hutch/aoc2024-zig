@@ -70,7 +70,7 @@ const days = .{
     },
     DayInfo{
         .f = .{ .one = Day12.day12 },
-        .answers = .{1433460, -1},
+        .answers = .{1433460, 855082},
         .test_answers = .{1930, 1206},
     },
 };
@@ -997,7 +997,7 @@ fn day11(input_file: std.fs.File) !Answers {
 
 const Day12 = struct {
     map: Str2d,
-    regions: std.ArrayList(Region),
+    region: ?Region,
     in_a_region: Array2d(bool),
 
     const Self = @This();
@@ -1005,60 +1005,73 @@ const Day12 = struct {
     const Region = struct {
         plant: u8,
         plots: std.ArrayList(Vec2u16),
+        perimeter: u32 = 0,
+        edges: u32 = 0,
+        fn area(self: Region) u32 {
+            return @intCast(self.plots.items.len);
+        }
     };
 
     fn day12(input_file: std.fs.File) !Answers {
         var self = Self {
             .map = Str2d.new(try input_file.readToEndAlloc(ally, 10_000_000)),
-            .regions = std.ArrayList(Region).init(ally),
+            .region = null,
             .in_a_region = undefined,
         };
         self.in_a_region = try Array2d(bool).init(ally, self.map.height(), self.map.width_sans_end);
+        @memset(self.in_a_region.data, false);
 
-        // Keep track of plots in each region
+        var part1_price: i64 = 0;
+        var part2_price: i64 = 0;
         for (0..self.map.height()) |row| {
             for (0..self.map.width_sans_end) |col| {
-                // If the plot is in a group, it's already processed.
+                // If the plot is in a region, it's already processed.
                 if (self.in_a_region.at(row, col)) continue;
 
-                try self.regions.append(Region {
+                self.region = Region {
                     .plant = self.map.at(row, col),
                     .plots = std.ArrayList(Vec2u16).init(ally),
-                });
+                };
                 try self.regionMarkAll(Vec2i.colrowCast(col, row));
+                var region = self.region.?;
+
+                // Calculate perimeter and edges for the region
+                for (region.plots.items) |pos_u16| {
+                    const pos: Vec2i = pos_u16.intCast(i32);
+                    inline for (Dir4.ALL) |dir| {
+                        if (self.map.getv(pos.plus(dir.unit_vec())) != region.plant) {
+                            region.perimeter += 1;
+                        }
+                    }
+                    inline for (.{Dir4.UP, Dir4.DOWN}) |dir1| {
+                        inline for (.{Dir4.LEFT, Dir4.RIGHT}) |dir2| {
+                            const corner_empty_sides = boolByte(self.map.getv(pos.plus(dir1.unit_vec())) != region.plant) +
+                                boolByte(self.map.getv(pos.plus(dir2.unit_vec())) != region.plant);
+                            if (corner_empty_sides == 2 or (
+                                corner_empty_sides == 0 and self.map.getv(
+                                    pos.plus(dir1.unit_vec().plus(dir2.unit_vec()))
+                                ) != region.plant
+                            )) {
+                                region.edges += 1;
+                            }
+                        }
+                    }
+                }
+
+                part1_price += region.perimeter * region.area();
+                part2_price += region.edges * region.area();
             }
         }
         std.debug.assert(std.mem.allEqual(bool, self.in_a_region.data, true));
 
-        // Calculate perimeter and area for each region
-        var total_price: i64 = 0;
-        for (self.regions.items) |region| {
-            var region_perimeter: u32 = 0;
-            for (region.plots.items) |pos_u16| {
-                const pos: Vec2i = pos_u16.intCast(i32);
-                for (Dir4.ALL) |dir| {
-                    if (self.map.getv(pos.plus(dir.unit_vec())) != region.plant) {
-                        region_perimeter += 1;
-                    }
-                }
-            }
-            const region_area = region.plots.items.len;
-            total_price += region_perimeter * @as(i64, @intCast(region_area));
-        }
-
-        // Part 2 ideas:
-        // Movement Dir4 and affix Dir4
-        // around the outside of the edge of a region
-        // when reaching plots not of the region, affix = movement and movement = affix.opposite()
-
-        return .{total_price, -1};
+        return .{part1_price, part2_price};
     }
 
     fn regionMarkAll(self: *Self, start_pos: Vec2i) !void {
         if (self.in_a_region.atv(start_pos)) return;
         self.in_a_region.mutv(start_pos).* = true;
 
-        try self.regions.items[self.regions.items.len-1].plots.append(start_pos.intCast(u16));
+        try self.region.?.plots.append(start_pos.intCast(u16));
         const plot = self.map.atv(start_pos);
         for (Dir4.ALL) |dir| {
             const pos = start_pos.plus(dir.unit_vec());
@@ -1334,6 +1347,12 @@ fn get2d(comptime T: type, slice: []const []const T, i: isize, j: isize, default
     return
         if (i < 0 or i >= slice.len or j < 0 or j >= slice[@intCast(i)].len) default
         else slice[@intCast(i)][@intCast(j)];
+}
+
+/// You can't just add the results of multiple `@intFromBool`, it immediately
+/// overflows, so this coerces the type to be a more sensible size.
+inline fn boolByte(b: bool) u8 {
+    return @intFromBool(b);
 }
 
 fn parseI32(buf: []const u8) std.fmt.ParseIntError!i32 {
